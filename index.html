@@ -1,0 +1,2053 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Kütüphanem</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0c0b08;--surface:#161410;--card:#1e1c16;--card2:#252219;
+  --border:#2c2920;--gold:#c9a84c;--gl2:#e8c97a;--gd:#6b5a28;
+  --cream:#f0ead8;--muted:#6e6a5e;--text:#ddd8cc;--accent:#8b3a10;
+  --gr:#3d7a52;--grl:#5aad76;--rd:#a03030;--rdl:#d95555;
+  --pu:#5a3a8a;--pul:#9a70d4;--rad:16px;--rads:10px;
+  --sb:env(safe-area-inset-bottom,0px);
+}
+body.light{--bg:#f5f0e8;--surface:#ede8dc;--card:#e4dece;--card2:#d9d2c0;--border:#c8c0aa;--cream:#2a2318;--muted:#8a8070;--text:#3a3020;}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;overflow:hidden;}
+body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;transition:background .3s,color .3s;}
+button{font-family:'DM Sans',sans-serif;cursor:pointer;}
+
+.app-body{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding-bottom:calc(78px + var(--sb));}
+.app-body::-webkit-scrollbar{display:none;}
+
+/* HEADER */
+.hdr{background:rgba(12,11,8,.95);padding:13px 18px 10px;border-bottom:1px solid var(--border);backdrop-filter:blur(14px);flex-shrink:0;}
+body.light .hdr{background:rgba(245,240,232,.95);}
+.hdr-row{display:flex;align-items:center;justify-content:space-between;}
+.hdr h1{font-family:'Playfair Display',serif;font-size:20px;color:var(--gold);}
+.hdr-sub{font-size:10px;color:var(--muted);margin-top:1px;}
+.hdr-right{display:flex;align-items:center;gap:8px;}
+.hdr-xp{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:3px 9px;display:flex;align-items:center;gap:5px;cursor:pointer;}
+.hdr-xp-lv{font-family:'Playfair Display',serif;font-size:12px;color:var(--gold);}
+.hdr-xp-bar{width:32px;height:3px;background:var(--border);border-radius:2px;overflow:hidden;}
+.hdr-xp-fill{height:100%;background:var(--gold);border-radius:2px;transition:width .5s;}
+.theme-btn{background:none;border:none;color:var(--muted);font-size:17px;padding:4px;line-height:1;}
+
+/* NAV */
+.bnav{position:fixed;bottom:0;left:0;right:0;background:rgba(12,11,8,.97);border-top:1px solid var(--border);display:flex;padding:5px 0 calc(5px + var(--sb));z-index:200;backdrop-filter:blur(16px);}
+body.light .bnav{background:rgba(237,232,220,.97);}
+.nb{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;color:var(--muted);font-size:9px;padding:4px 2px;transition:color .2s;font-weight:500;}
+.nb.on{color:var(--gold);}
+.nb-ic{font-size:18px;line-height:1;}
+
+/* SCREENS */
+.sc{display:none;}.sc.on{display:block;}
+.pad{padding:0 18px;}.pt12{padding-top:12px;}
+
+/* SECTION TITLE */
+.stitle{font-family:'Playfair Display',serif;font-size:15px;color:var(--cream);margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;}
+.slink{font-size:11px;color:var(--gold);font-family:'DM Sans',sans-serif;font-weight:500;}
+
+/* STATS BAR */
+.sbar{display:flex;gap:7px;padding:10px 18px 4px;overflow-x:auto;scrollbar-width:none;}
+.sbar::-webkit-scrollbar{display:none;}
+.spill{background:var(--card);border:1px solid var(--border);border-radius:50px;padding:5px 11px;display:flex;align-items:center;gap:5px;white-space:nowrap;flex-shrink:0;}
+.spill .n{font-family:'Playfair Display',serif;font-size:15px;color:var(--gold);line-height:1;}
+.spill .l{font-size:9px;color:var(--muted);}
+
+/* STREAK */
+.streak{margin:8px 18px 10px;background:linear-gradient(135deg,#1c1808,#241f0a);border:1px solid var(--gd);border-radius:var(--rad);padding:11px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;}
+body.light .streak{background:linear-gradient(135deg,#ede0b8,#e8d89a);}
+.streak h3{font-family:'Playfair Display',serif;font-size:16px;color:var(--gl2);}
+body.light .streak h3{color:#6b4a00;}
+.streak p{font-size:10px;color:var(--muted);}
+.sdots{display:flex;gap:4px;}
+.sd{width:8px;height:8px;border-radius:50%;background:var(--border);transition:all .3s;}
+.sd.on{background:var(--gold);box-shadow:0 0 4px var(--gold);}
+.sd.now{background:var(--grl);box-shadow:0 0 4px var(--grl);}
+
+/* BOOK CARD */
+.bcard{background:var(--card);border:1px solid var(--border);border-radius:var(--rad);padding:12px;margin-bottom:8px;display:flex;gap:10px;align-items:flex-start;cursor:pointer;transition:border-color .18s,transform .12s;user-select:none;}
+.bcard:active{border-color:var(--gd);transform:scale(.99);}
+.bcov{width:44px;height:60px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;background:linear-gradient(135deg,var(--accent),#5c2e0e);}
+.binf{flex:1;min-width:0;}
+.btit{font-family:'Playfair Display',serif;font-size:13px;color:var(--cream);line-height:1.3;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.baut{font-size:11px;color:var(--muted);margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.bmeta{display:flex;gap:5px;align-items:center;flex-wrap:wrap;}
+.badge{font-size:9px;padding:2px 7px;border-radius:20px;font-weight:600;}
+.br{background:#0f2a1a;color:#5aad76;}.bd{background:#0f1e2a;color:#5a9fd4;}.bp{background:#1e1a0a;color:#c9a84c;}
+.pbar{height:3px;background:var(--border);border-radius:2px;margin-top:5px;overflow:hidden;}
+.pfill{height:100%;background:linear-gradient(90deg,var(--accent),var(--gold));border-radius:2px;transition:width .6s;}
+.bpgt{font-size:9px;color:var(--muted);margin-top:2px;}
+
+/* FAB */
+.fab{position:fixed;bottom:calc(70px + var(--sb));right:16px;width:48px;height:48px;border-radius:50%;background:var(--gold);color:#0c0b08;border:none;font-size:24px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(201,168,76,.5);z-index:150;transition:transform .15s;}
+.fab:active{transform:scale(.88);}
+
+/* OVERLAY / MODAL */
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:300;display:none;align-items:flex-end;backdrop-filter:blur(5px);}
+.ov.on{display:flex;}
+.mdl{background:var(--surface);border-radius:22px 22px 0 0;border-top:1px solid var(--border);width:100%;max-height:93vh;overflow-y:auto;padding:16px 18px calc(30px + var(--sb));animation:sup .25s cubic-bezier(.32,.72,0,1);}
+.mdl::-webkit-scrollbar{display:none;}
+/* FULLSCREEN MODAL */
+.mdl-full{border-radius:0;max-height:100vh;height:100vh;padding-top:0;}
+@keyframes sup{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.mhdl{width:32px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 13px;}
+.mdl h2{font-family:'Playfair Display',serif;font-size:17px;color:var(--cream);margin-bottom:13px;}
+
+/* FORM */
+.fg{margin-bottom:11px;}
+.fg label{display:block;font-size:10px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.8px;font-weight:600;}
+input,select,textarea{width:100%;background:var(--card);border:1px solid var(--border);border-radius:var(--rads);padding:10px 12px;color:var(--text);font-size:15px;outline:none;transition:border-color .2s;font-family:'DM Sans',sans-serif;}
+input:focus,select:focus,textarea:focus{border-color:var(--gold);}
+textarea{resize:none;min-height:80px;line-height:1.6;}
+select option{background:var(--card);}
+.r2{display:flex;gap:7px;}.r2>*{flex:1;}
+.stars{display:flex;gap:5px;margin-top:3px;}
+.star{font-size:24px;opacity:.2;transition:opacity .15s,transform .1s;line-height:1;background:none;border:none;padding:0;}
+.star.on{opacity:1;}.star:active{transform:scale(1.2);}
+.emrow{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px;}
+.emopt{width:38px;height:38px;border-radius:8px;background:var(--card);border:2px solid var(--border);font-size:18px;display:flex;align-items:center;justify-content:center;transition:border-color .18s;}
+.emopt.on{border-color:var(--gold);background:rgba(201,168,76,.1);}
+.btn{display:block;width:100%;border:none;border-radius:11px;padding:12px;font-size:14px;font-weight:600;transition:opacity .15s,transform .1s;margin-top:7px;text-align:center;}
+.btn:active{opacity:.8;transform:scale(.98);}
+.bg{background:var(--gold);color:#0c0b08;}
+.bo{background:transparent;color:var(--muted);border:1px solid var(--border);}
+.bred{background:var(--rd);color:#fff;}
+.brow{display:flex;gap:7px;margin-top:7px;}.brow .btn{margin-top:0;}
+
+/* JOURNAL */
+.jdate{font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:1.2px;margin:13px 0 5px;font-weight:600;}
+.jcard{background:var(--card);border:1px solid var(--border);border-left:3px solid var(--gd);border-radius:var(--rad);padding:11px 38px 11px 12px;margin-bottom:7px;cursor:pointer;transition:border-color .18s;}
+.jcard:active{border-color:var(--gold);}
+.jbook{font-size:10px;color:var(--gold);margin-bottom:3px;}
+.jtext{font-size:13px;color:var(--text);line-height:1.5;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+.jfoot{font-size:10px;color:var(--muted);margin-top:5px;display:flex;gap:8px;flex-wrap:wrap;}
+.jdel{position:absolute;top:9px;right:9px;background:none;border:none;color:var(--muted);font-size:13px;padding:3px;opacity:.5;}
+.jdel:hover{opacity:1;}
+.jedit{position:absolute;top:9px;right:30px;background:none;border:none;color:var(--muted);font-size:13px;padding:3px;opacity:.5;}
+.jedit:hover{opacity:1;}
+
+/* JOURNAL READER (fullscreen) */
+.jreader{padding:20px 18px calc(40px + var(--sb));min-height:100%;overflow-y:auto;}
+.jreader-back{background:none;border:none;color:var(--gold);font-size:14px;font-weight:600;padding:0;margin-bottom:16px;display:flex;align-items:center;gap:6px;}
+.jreader-title{font-family:'Playfair Display',serif;font-size:22px;color:var(--cream);margin-bottom:4px;line-height:1.3;}
+.jreader-meta{font-size:11px;color:var(--muted);margin-bottom:20px;display:flex;gap:12px;flex-wrap:wrap;}
+.jreader-body{font-size:15px;color:var(--text);line-height:1.9;white-space:pre-wrap;word-break:break-word;}
+.jreader-actions{display:flex;gap:8px;margin-top:24px;}
+
+/* VOCAB */
+.xpcard{background:var(--card);border:1px solid var(--border);border-radius:var(--rad);padding:11px 14px;margin-bottom:11px;}
+.xpcr{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;}
+.xplbl{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.8px;}
+.xplv{font-family:'Playfair Display',serif;font-size:14px;color:var(--gold);}
+.xptrack{height:6px;background:var(--border);border-radius:3px;overflow:hidden;}
+.xpfill{height:100%;background:linear-gradient(90deg,var(--pul),var(--gold));border-radius:3px;transition:width .6s;}
+.xpnum{font-size:9px;color:var(--muted);text-align:right;margin-top:2px;}
+
+.srch{position:relative;margin-bottom:10px;}
+.srch input{padding-left:32px;}
+.si{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:14px;pointer-events:none;}
+
+.ftabs{display:flex;gap:5px;margin-bottom:10px;overflow-x:auto;scrollbar-width:none;}
+.ftabs::-webkit-scrollbar{display:none;}
+.ftab{flex-shrink:0;padding:5px 11px;border-radius:20px;border:1px solid var(--border);background:var(--card);color:var(--muted);font-size:10px;font-weight:600;transition:all .18s;white-space:nowrap;}
+.ftab.on{background:var(--gold);color:#0c0b08;border-color:var(--gold);}
+
+.vcard{background:var(--card);border:1px solid var(--border);border-radius:var(--rad);padding:11px 13px;margin-bottom:7px;display:flex;align-items:flex-start;gap:9px;cursor:pointer;transition:border-color .18s,transform .12s;}
+.vcard:active{border-color:var(--pul);transform:scale(.99);}
+.vlet{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,var(--pu),#2a5a8a);display:flex;align-items:center;justify-content:center;font-family:'Playfair Display',serif;font-size:16px;color:#fff;flex-shrink:0;}
+.vword{font-family:'Playfair Display',serif;font-size:13px;color:var(--cream);margin-bottom:2px;}
+.vmean{font-size:11px;color:var(--text);line-height:1.5;}
+.vref{font-size:10px;color:var(--muted);margin-top:2px;}
+.mrow{display:flex;align-items:center;gap:6px;margin-top:4px;}
+.md{width:6px;height:6px;border-radius:50%;background:var(--border);}
+.md.on{background:var(--gold);}
+.mtxt{font-size:9px;color:var(--muted);font-weight:600;}
+.tag{display:inline-block;font-size:9px;padding:2px 6px;border-radius:20px;background:rgba(154,112,212,.15);color:var(--pul);border:1px solid rgba(154,112,212,.3);}
+
+/* WORD OF THE DAY */
+.wotd{background:linear-gradient(135deg,#1a1030,#0e1a30);border:1px solid var(--pul);border-radius:var(--rad);padding:14px 16px;margin-bottom:12px;position:relative;overflow:hidden;}
+body.light .wotd{background:linear-gradient(135deg,#e0d4f5,#d0e0f5);}
+.wotd::before{content:'';position:absolute;top:-20px;right:-20px;width:80px;height:80px;border-radius:50%;background:rgba(154,112,212,.07);}
+.wotd-lbl{font-size:9px;color:var(--pul);text-transform:uppercase;letter-spacing:1px;font-weight:600;margin-bottom:6px;}
+.wotd-word{font-family:'Playfair Display',serif;font-size:20px;color:var(--gl2);margin-bottom:4px;}
+body.light .wotd-word{color:#5a3a8a;}
+.wotd-mean{font-size:12px;color:var(--text);line-height:1.5;padding-right:60px;}
+.wotd-add{position:absolute;top:12px;right:12px;background:rgba(154,112,212,.2);border:1px solid var(--pul);border-radius:20px;padding:4px 10px;font-size:10px;color:var(--pul);font-weight:600;cursor:pointer;}
+.wotd-added{background:rgba(61,122,82,.2);border-color:var(--grl);color:var(--grl);cursor:default;}
+.wotd-src{font-size:9px;color:var(--muted);margin-top:5px;}
+
+/* GAMES */
+.ghero{background:var(--card);border:1px solid var(--border);border-radius:var(--rad);padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;}
+.ggrid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:14px;}
+.gtile{background:var(--card);border:1px solid var(--border);border-radius:var(--rad);padding:14px 10px;text-align:center;cursor:pointer;transition:border-color .18s,transform .12s;display:flex;flex-direction:column;align-items:center;gap:4px;}
+.gtile:active{transform:scale(.95);border-color:var(--gd);}
+.gtic{font-size:26px;}
+.gtnm{font-family:'Playfair Display',serif;font-size:12px;color:var(--cream);}
+.gtds{font-size:9px;color:var(--muted);line-height:1.3;}
+.gtbs{font-size:9px;padding:2px 6px;border-radius:20px;background:#0f2a1a;color:#5aad76;font-weight:600;}
+.gtile.dim{opacity:.4;cursor:not-allowed;}.gtile.dim:active{transform:none;}
+.shrow{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:9px 12px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center;}
+.shg{font-size:11px;color:var(--cream);}
+.shd{font-size:9px;color:var(--muted);margin-top:1px;}
+.shs{font-family:'Playfair Display',serif;font-size:15px;color:var(--gold);}
+.sha{font-size:9px;color:var(--muted);}
+
+/* ARENA */
+.arena{position:fixed;inset:0;background:var(--bg);z-index:500;display:none;flex-direction:column;}
+.arena.on{display:flex;}
+.atop{display:flex;align-items:center;gap:9px;padding:12px 15px;background:rgba(12,11,8,.96);border-bottom:1px solid var(--border);flex-shrink:0;}
+body.light .atop{background:rgba(245,240,232,.96);}
+.abk{background:none;border:none;color:var(--muted);font-size:20px;padding:3px;line-height:1;}
+.atit{font-family:'Playfair Display',serif;font-size:14px;color:var(--cream);flex:1;}
+.asc{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:3px 9px;font-size:12px;color:var(--gold);font-weight:600;}
+.abody{flex:1;overflow-y:auto;padding:14px;max-width:460px;width:100%;margin:0 auto;}
+.abody::-webkit-scrollbar{display:none;}
+
+.sbanner{display:flex;gap:7px;margin-bottom:14px;}
+.sp2{flex:1;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:7px;text-align:center;}
+.sp2-n{font-family:'Playfair Display',serif;font-size:18px;color:var(--gold);line-height:1;}
+.sp2-l{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;font-weight:600;}
+
+.pdots{display:flex;gap:3px;justify-content:center;margin-bottom:12px;flex-wrap:wrap;}
+.pd{width:7px;height:7px;border-radius:50%;background:var(--border);}
+.pd.c{background:var(--grl);}.pd.w{background:var(--rdl);}.pd.cur{background:var(--gold);}
+
+/* QA */
+.qacard{background:linear-gradient(135deg,#1c1808,#20190a);border:1px solid var(--gd);border-radius:18px;padding:22px 15px;text-align:center;margin-bottom:14px;}
+body.light .qacard{background:linear-gradient(135deg,#ede0b8,#e8d89a);}
+.qaword{font-family:'Playfair Display',serif;font-size:26px;color:var(--gl2);margin-bottom:5px;}
+body.light .qaword{color:#6b4a00;}
+.qahint{font-size:11px;color:var(--muted);}
+.qaopts{display:flex;flex-direction:column;gap:7px;}
+.qaopt{background:var(--card);border:2px solid var(--border);border-radius:11px;padding:11px 14px;font-size:13px;color:var(--text);text-align:left;transition:all .18s;line-height:1.4;}
+.qaopt:active{transform:scale(.98);}
+.qaopt.ok{border-color:var(--grl);background:#0a1f12;color:var(--grl);}
+.qaopt.bad{border-color:var(--rdl);background:#1f0a0a;color:var(--rdl);}
+.qaopt.rev{border-color:var(--gd);background:#1a1506;}
+.qafb{text-align:center;padding:11px;font-size:13px;font-weight:600;}
+.qafb.ok{color:var(--grl);}.qafb.bad{color:var(--rdl);}
+
+/* MATCH */
+.matchcols{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.mc{background:var(--card);border:2px solid var(--border);border-radius:10px;padding:9px 7px;text-align:center;font-size:11px;transition:all .18s;min-height:50px;display:flex;align-items:center;justify-content:center;line-height:1.4;margin-bottom:5px;cursor:pointer;}
+.mc.word{font-family:'Playfair Display',serif;font-size:12px;color:var(--cream);}
+.mc.mean{font-size:10px;color:var(--text);}
+.mc.sel{border-color:var(--gold);background:rgba(201,168,76,.08);}
+.mc.done{border-color:var(--grl);background:#0a1a0f;color:var(--grl);pointer-events:none;opacity:.6;}
+.mc.err{animation:shk .3s;border-color:var(--rdl);}
+@keyframes shk{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+
+/* FLASHCARD */
+.fcwrap{perspective:900px;margin-bottom:18px;cursor:pointer;}
+.fc{width:100%;padding-top:56%;position:relative;transition:transform .45s;transform-style:preserve-3d;}
+.fc.flip{transform:rotateY(180deg);}
+.fcface{position:absolute;inset:0;border-radius:18px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:7px;backface-visibility:hidden;padding:18px;}
+.fcfront{background:linear-gradient(135deg,#1c1808,#241d0a);border:1px solid var(--gd);}
+body.light .fcfront{background:linear-gradient(135deg,#ede0b8,#e8d89a);}
+.fcback{background:linear-gradient(135deg,#0a1a12,#0e2018);border:1px solid var(--gr);transform:rotateY(180deg);}
+.fcword{font-family:'Playfair Display',serif;font-size:26px;color:var(--gl2);text-align:center;}
+body.light .fcword{color:#6b4a00;}
+.fctap{font-size:10px;color:var(--muted);}
+.fcmean{font-size:14px;color:var(--cream);text-align:center;line-height:1.6;}
+.fcex{font-size:11px;color:var(--grl);font-style:italic;text-align:center;}
+.fcsrc{font-size:10px;color:var(--muted);text-align:center;}
+.fcacts{display:flex;gap:8px;margin-bottom:14px;}
+.fcbtn{flex:1;padding:11px;border-radius:10px;border:none;font-size:12px;font-weight:600;transition:opacity .15s;}
+.fcbtn:active{opacity:.8;}
+.fcknow{background:#0a1f12;color:var(--grl);border:1px solid var(--gr);}
+.fcnope{background:#1f0a0a;color:var(--rdl);border:1px solid var(--rd);}
+
+/* FILL */
+.fillsent{background:var(--card2);border:1px solid var(--border);border-radius:13px;padding:14px;font-size:14px;color:var(--text);line-height:2.1;margin-bottom:14px;font-family:'Playfair Display',serif;}
+.fillblk{display:inline-block;border-bottom:2px solid var(--gold);min-width:60px;text-align:center;color:var(--gold);font-weight:700;margin:0 2px;}
+.fillblk.ans{color:var(--grl);border-color:var(--grl);}
+.fillopts{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
+.fillchip{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:6px 12px;font-size:12px;color:var(--text);transition:all .15s;}
+.fillchip:active{transform:scale(.95);}
+.fillchip.ok{background:#0a1f12;border-color:var(--grl);color:var(--grl);}
+.fillchip.bad{background:#1f0a0a;border-color:var(--rdl);color:var(--rdl);}
+.fillchip.hint{border-color:var(--gd);color:var(--gl2);}
+
+/* SPELL */
+.spellans{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-bottom:11px;min-height:44px;align-items:center;}
+.spslot{width:30px;height:38px;border-bottom:2px solid var(--gd);display:flex;align-items:center;justify-content:center;font-family:'Playfair Display',serif;font-size:17px;color:var(--gl2);cursor:pointer;user-select:none;}
+.splbts{display:flex;flex-wrap:wrap;gap:5px;justify-content:center;margin-bottom:12px;}
+.splbt{width:38px;height:38px;border-radius:9px;background:var(--card);border:1px solid var(--border);color:var(--cream);font-size:15px;font-family:'Playfair Display',serif;display:flex;align-items:center;justify-content:center;user-select:none;}
+.splbt:active{background:var(--gold);color:#0c0b08;transform:scale(.9);}
+.splbt.used{opacity:.12;pointer-events:none;}
+
+/* RESULT */
+.result{text-align:center;padding:22px 8px;}
+.ric{font-size:52px;margin-bottom:11px;}
+.rtit{font-family:'Playfair Display',serif;font-size:22px;color:var(--cream);margin-bottom:4px;}
+.rsc{font-family:'Playfair Display',serif;font-size:40px;color:var(--gold);line-height:1;}
+.rsub{font-size:11px;color:var(--muted);margin-top:3px;margin-bottom:16px;}
+.rtbl{background:var(--card);border:1px solid var(--border);border-radius:var(--rad);padding:12px;margin-bottom:14px;}
+.rrow{display:flex;justify-content:space-between;font-size:13px;padding:4px 0;border-bottom:1px solid var(--border);}
+.rrow:last-child{border:none;}
+
+/* SETTINGS */
+.srow{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border);}
+.srow:last-child{border:none;}
+.srow-i h4{font-size:13px;color:var(--cream);}
+.srow-i p{font-size:10px;color:var(--muted);margin-top:1px;}
+.srow-a{color:var(--gold);font-size:12px;background:none;border:none;font-weight:600;}
+.toggle{width:40px;height:22px;border-radius:11px;background:var(--border);position:relative;border:none;transition:background .25s;flex-shrink:0;}
+.toggle.on{background:var(--gold);}
+.toggle::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .25s;}
+.toggle.on::after{left:21px;}
+
+/* EMPTY */
+.empty{text-align:center;padding:36px 20px;color:var(--muted);}
+.empty .ei{font-size:36px;margin-bottom:8px;}
+.empty p{font-size:12px;line-height:1.7;}
+
+/* TOAST */
+.toast{position:fixed;top:14px;left:50%;transform:translateX(-50%) translateY(-90px);background:var(--card);border:1px solid var(--border);border-radius:10px;padding:7px 14px;font-size:12px;color:var(--text);z-index:2000;transition:transform .3s cubic-bezier(.32,.72,0,1);white-space:nowrap;pointer-events:none;max-width:80vw;text-align:center;}
+.toast.on{transform:translateX(-50%) translateY(0);}
+
+/* EXCEL IMPORT PROGRESS */
+.improg{background:var(--card2);border:1px solid var(--border);border-radius:var(--rads);padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--text);}
+.improg .imp-bar{height:4px;background:var(--border);border-radius:2px;margin-top:6px;overflow:hidden;}
+.improg .imp-fill{height:100%;background:var(--gold);border-radius:2px;transition:width .3s;}
+
+.mt10{margin-top:10px;}.mt14{margin-top:14px;}.mb8{margin-bottom:8px;}
+</style>
+</head>
+<body>
+
+<div class="toast" id="toast"></div>
+
+<!-- HEADER -->
+<header class="hdr">
+  <div class="hdr-row">
+    <div><h1>📚 Kütüphanem</h1><div class="hdr-sub" id="hdate"></div></div>
+    <div class="hdr-right">
+      <div class="hdr-xp" onclick="goScreen('settings',document.querySelector('.nb:last-child'))">
+        <span class="hdr-xp-lv" id="hxplv">Lvl 1</span>
+        <div class="hdr-xp-bar"><div class="hdr-xp-fill" id="hxpf"></div></div>
+      </div>
+      <button class="theme-btn" id="thbtn" onclick="toggleTheme()">🌙</button>
+    </div>
+  </div>
+</header>
+
+<div class="app-body">
+
+<!-- ══ HOME ══ -->
+<div class="sc on" id="sc-home">
+  <div class="sbar">
+    <div class="spill"><span class="n" id="st-tot">0</span><span class="l">Kitap</span></div>
+    <div class="spill"><span class="n" id="st-rd">0</span><span class="l">Okunuyor</span></div>
+    <div class="spill"><span class="n" id="st-dn">0</span><span class="l">Bitti</span></div>
+    <div class="spill"><span class="n" id="st-vc">0</span><span class="l">Kelime</span></div>
+    <div class="spill"><span class="n" id="st-pg">0</span><span class="l">Sayfa</span></div>
+  </div>
+  <div class="streak">
+    <div><h3>🔥 <span id="st-str">0</span> Günlük Seri</h3><p>Her gün okuyarak devam et!</p></div>
+    <div class="sdots" id="sdots"></div>
+  </div>
+  <div class="pad">
+    <div class="stitle">Şu An Okunanlar</div>
+    <div id="h-reading"></div>
+    <div class="stitle mt14">Tüm Kitaplar <span class="slink" onclick="openBookModal()">+ Ekle</span></div>
+    <div id="h-all"></div>
+  </div>
+</div>
+
+<!-- ══ JOURNAL ══ -->
+<div class="sc" id="sc-journal">
+  <div class="pad pt12">
+    <div class="stitle">Okuma Günlüğü <span class="slink" onclick="openJournalModal()">+ Giriş Ekle</span></div>
+    <div id="jlist"></div>
+  </div>
+</div>
+
+<!-- ══ VOCAB ══ -->
+<div class="sc" id="sc-vocab">
+  <div class="pad pt12">
+    <div class="wotd" id="wotd-card">
+      <div class="wotd-lbl">✨ Günün Kelimesi</div>
+      <div class="wotd-word" id="wotd-word">Yükleniyor…</div>
+      <div class="wotd-mean" id="wotd-mean"></div>
+      <div class="wotd-src" id="wotd-src"></div>
+      <div style="position:absolute;top:12px;right:12px;display:flex;gap:5px;align-items:center;">
+        <button class="wotd-add" id="wotd-addbtn">+ Ekle</button>
+        <button onclick="refreshWOTD()" style="background:rgba(154,112,212,.15);border:1px solid var(--pul);border-radius:50%;width:24px;height:24px;font-size:11px;color:var(--pul);display:flex;align-items:center;justify-content:center;flex-shrink:0;" title="Yeni kelime üret">🔄</button>
+      </div>
+    </div>
+
+    <div class="xpcard">
+      <div class="xpcr"><span class="xplbl">Kelime Ustası</span><span class="xplv" id="xplvtxt">Seviye 1</span></div>
+      <div class="xptrack"><div class="xpfill" id="xpfill"></div></div>
+      <div class="xpnum" id="xpnum">0 / 500 XP</div>
+    </div>
+
+    <div class="stitle">Kelime Haznem <span class="slink" onclick="openWordModal()">+ Kelime Ekle</span></div>
+    <div class="srch"><span class="si">🔍</span><input id="vq" placeholder="Kelime ara…" oninput="renderVocab()"></div>
+    <div class="ftabs" id="vtabs">
+      <div class="ftab on" onclick="setVF('all',this)">Tümü <span id="vc-all">(0)</span></div>
+      <div class="ftab" onclick="setVF('new',this)">🆕 Yeni</div>
+      <div class="ftab" onclick="setVF('learning',this)">📈 Öğreniliyor</div>
+      <div class="ftab" onclick="setVF('mastered',this)">✅ Öğrenildi</div>
+    </div>
+    <div id="vlist"></div>
+  </div>
+</div>
+
+<!-- ══ GAMES ══ -->
+<div class="sc" id="sc-games">
+  <div class="pad pt12">
+    <div class="ghero">
+      <div style="font-size:22px" id="gh-ic">🎯</div>
+      <div><div style="font-size:12px;color:var(--cream);font-weight:600" id="gh-tit">Antrenman Hazır</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:1px" id="gh-sub">Bir oyun modu seç!</div></div>
+    </div>
+    <div class="stitle">Oyun Modları</div>
+    <div class="ggrid" id="ggrid"></div>
+    <div class="stitle mt10">Son Skorlar</div>
+    <div id="slist"></div>
+  </div>
+</div>
+
+<!-- API Key Modal -->
+<div class="ov" id="ov-apikey">
+<div class="mdl">
+  <div class="mhdl"></div>
+  <h2>🤖 Claude API Anahtarı</h2>
+  <p style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.7;">
+    Günün kelimesini Claude AI ile üretmek için Anthropic API anahtarına ihtiyaç var.
+    Anahtar yalnızca <strong style="color:var(--cream)">bu cihazda</strong> saklanır, hiçbir sunucuya gönderilmez.
+  </p>
+  <div class="fg">
+    <label>API Anahtarı</label>
+    <div style="position:relative;">
+      <input id="apikey-input" type="password" placeholder="sk-ant-api03-…" autocomplete="off" autocorrect="off" spellcheck="false">
+      <button onclick="toggleApiKeyVis()" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);font-size:14px;padding:4px;" id="apikey-vis-btn">👁️</button>
+    </div>
+  </div>
+  <div style="background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px;">
+    <p style="font-size:11px;color:var(--text);line-height:1.7;">
+      1. <a href="https://console.anthropic.com" target="_blank" style="color:var(--gold)">console.anthropic.com</a> adresine git<br>
+      2. Hesap oluştur (ücretsiz $5 kredi verilir)<br>
+      3. API Keys → Create Key → kopyala
+    </p>
+  </div>
+  <button class="btn bg" onclick="saveApiKey()">💾 Kaydet</button>
+  <button class="btn bo" onclick="closeOv('ov-apikey')">İptal</button>
+</div>
+</div>
+
+<!-- ══ SETTINGS ══ -->
+<div class="sc" id="sc-settings">
+  <div class="pad pt12">
+    <div class="stitle">Ayarlar &amp; Veri</div>
+    <div>
+      <div class="srow">
+        <div class="srow-i"><h4>🤖 Claude API Anahtarı</h4><p id="apikey-status">Günün kelimesini AI ile üret</p></div>
+        <button class="srow-a" onclick="openOv('ov-apikey')" id="apikey-btn">Gir</button>
+      </div>
+      <div class="srow">
+        <div class="srow-i"><h4>🌙 Karanlık Tema</h4><p>Tema tercihini değiştir</p></div>
+        <button class="toggle" id="thgtoggle" onclick="toggleTheme()"></button>
+      </div>
+      <div class="srow">
+        <div class="srow-i"><h4>📤 JSON Yedek Al</h4><p>Tüm verileri JSON olarak indir</p></div>
+        <button class="srow-a" onclick="exportJSON()">İndir</button>
+      </div>
+      <div class="srow">
+        <div class="srow-i"><h4>📥 JSON Yedek Yükle</h4><p>Daha önce alınan yedeği geri yükle</p></div>
+        <button class="srow-a" onclick="document.getElementById('imp-json').click()">Yükle</button>
+      </div>
+      <div class="srow">
+        <div class="srow-i"><h4>📊 Excel'den Kelime Aktar</h4><p>Toplu kelime yükleme (.xlsx, .csv)</p></div>
+        <button class="srow-a" onclick="document.getElementById('imp-excel').click()">Yükle</button>
+      </div>
+      <div class="srow">
+        <div class="srow-i"><h4>📊 Kelimeleri Excel'e Aktar</h4><p>Kelime listeni .csv olarak indir</p></div>
+        <button class="srow-a" onclick="exportCSV()">İndir</button>
+      </div>
+      <div class="srow">
+        <div class="srow-i"><h4>🗑️ Tüm Verileri Sil</h4><p>Bu işlem geri alınamaz!</p></div>
+        <button class="srow-a" style="color:var(--rdl)" onclick="clearAll()">Sil</button>
+      </div>
+    </div>
+    <input type="file" id="imp-json" accept=".json" style="display:none" onchange="importJSON(event)">
+    <input type="file" id="imp-excel" accept=".xlsx,.csv,.xls" style="display:none" onchange="importExcel(event)">
+    <div id="excel-progress" style="display:none" class="improg">
+      <span id="excel-prog-txt">İşleniyor…</span>
+      <div class="imp-bar"><div class="imp-fill" id="excel-prog-fill"></div></div>
+    </div>
+    <div class="mt14" style="background:var(--card);border:1px solid var(--border);border-radius:var(--rad);padding:13px;">
+      <p style="font-size:12px;color:var(--text);line-height:1.7;">
+        📊 <strong style="color:var(--cream)">Excel formatı:</strong> İlk satır başlık olmalı.<br>
+        Sütunlar: <code style="color:var(--gold)">kelime | anlam | ornek | kitap</code><br>
+        (son iki sütun opsiyonel)
+      </p>
+      <p style="font-size:10px;color:var(--muted);margin-top:6px;">
+        Sürüm 3.2 · Kütüphanem · Claude AI destekli
+      </p>
+    </div>
+  </div>
+</div>
+
+</div><!-- /app-body -->
+
+<nav class="bnav">
+  <button class="nb on" onclick="goScreen('home',this)"><div class="nb-ic">🏠</div>Ana Sayfa</button>
+  <button class="nb" onclick="goScreen('journal',this)"><div class="nb-ic">📓</div>Günlük</button>
+  <button class="nb" onclick="goScreen('vocab',this)"><div class="nb-ic">🔤</div>Kelimeler</button>
+  <button class="nb" onclick="goScreen('games',this)"><div class="nb-ic">🎮</div>Antrenman</button>
+  <button class="nb" onclick="goScreen('settings',this)"><div class="nb-ic">⚙️</div>Ayarlar</button>
+</nav>
+
+<button class="fab" id="fab" onclick="fabAct()">＋</button>
+
+<!-- ═══ MODALS ═══ -->
+
+<!-- Book -->
+<div class="ov" id="ov-book">
+<div class="mdl">
+  <div class="mhdl"></div>
+  <h2 id="bm-h">Kitap Ekle</h2>
+  <div class="fg"><label>Kapak</label>
+    <div class="emrow" id="emrow">
+      <div class="emopt on" onclick="pEmoji(this,'📕')">📕</div>
+      <div class="emopt" onclick="pEmoji(this,'📗')">📗</div>
+      <div class="emopt" onclick="pEmoji(this,'📘')">📘</div>
+      <div class="emopt" onclick="pEmoji(this,'📙')">📙</div>
+      <div class="emopt" onclick="pEmoji(this,'📒')">📒</div>
+      <div class="emopt" onclick="pEmoji(this,'📔')">📔</div>
+      <div class="emopt" onclick="pEmoji(this,'🔖')">🔖</div>
+      <div class="emopt" onclick="pEmoji(this,'📜')">📜</div>
+    </div>
+  </div>
+  <div class="fg"><label>Kitap Adı *</label><input id="b-tit" placeholder="Suç ve Ceza"></div>
+  <div class="fg"><label>Yazar</label><input id="b-aut" placeholder="Fyodor Dostoyevski"></div>
+  <div class="fg"><label>Kategori</label><input id="b-gen" placeholder="Roman, Felsefe, Bilim…"></div>
+  <div class="fg"><label>Toplam Sayfa</label><input id="b-pg" type="number" min="1" placeholder="480"></div>
+  <div class="fg"><label>Durum</label>
+    <select id="b-st" onchange="onBStatus()">
+      <option value="reading">📖 Okuyorum</option>
+      <option value="plan">📌 Okuyacağım</option>
+      <option value="done">✅ Tamamladım</option>
+    </select>
+  </div>
+  <div class="fg" id="b-cpg-g"><label>Şu Anki Sayfa</label><input id="b-cpg" type="number" min="0" placeholder="0"></div>
+  <div class="fg" id="b-rat-g" style="display:none"><label>Puan</label>
+    <div class="stars" id="b-stars">
+      <button class="star" onclick="pStar(1)">⭐</button><button class="star" onclick="pStar(2)">⭐</button>
+      <button class="star" onclick="pStar(3)">⭐</button><button class="star" onclick="pStar(4)">⭐</button>
+      <button class="star" onclick="pStar(5)">⭐</button>
+    </div>
+  </div>
+  <button class="btn bg" onclick="saveBook()">Kaydet</button>
+  <button class="btn bo" onclick="closeOv('ov-book')">İptal</button>
+</div>
+</div>
+
+<!-- Journal -->
+<div class="ov" id="ov-journal">
+<div class="mdl">
+  <div class="mhdl"></div>
+  <h2 id="jm-h">Okuma Günlüğü</h2>
+  <input type="hidden" id="j-eid">
+  <div class="fg"><label>Kitap *</label><select id="j-book"><option value="">-- Kitap Seç --</option></select></div>
+  <div class="fg"><label>Okunan Sayfalar</label>
+    <div class="r2"><input id="j-from" type="number" min="0" placeholder="Başlangıç sayfası"><input id="j-to" type="number" min="0" placeholder="Bitiş sayfası"></div>
+  </div>
+  <div class="fg"><label>Bugünün Özeti *</label>
+    <textarea id="j-sum" style="min-height:120px;" placeholder="Bugün ne okudun? Seni etkileyen bir sahne var mıydı? Kitap hakkında düşüncelerini yaz…"></textarea>
+  </div>
+  <div class="fg"><label>Okuma Keyfi</label>
+    <div class="stars" id="j-stars">
+      <button class="star" onclick="pJStar(1)">⭐</button><button class="star" onclick="pJStar(2)">⭐</button>
+      <button class="star" onclick="pJStar(3)">⭐</button><button class="star" onclick="pJStar(4)">⭐</button>
+      <button class="star" onclick="pJStar(5)">⭐</button>
+    </div>
+  </div>
+  <button class="btn bg" onclick="saveJournal()">Kaydet</button>
+  <button class="btn bo" onclick="closeOv('ov-journal')">İptal</button>
+</div>
+</div>
+
+<!-- Word -->
+<div class="ov" id="ov-word">
+<div class="mdl">
+  <div class="mhdl"></div>
+  <h2 id="wm-h">Kelime Ekle</h2>
+  <div class="fg"><label>Kelime *</label><input id="w-word" placeholder="Müstesna"></div>
+  <div class="fg"><label>Anlamı *</label><textarea id="w-mean" style="min-height:70px;" placeholder="Bir tür veya sınıftan ayrı tutulan, istisna olan şey."></textarea></div>
+  <div class="fg"><label>Örnek Cümle</label><input id="w-ex" placeholder="Bu müstesna eser yüzyıllar boyunca okundu."></div>
+  <div class="fg"><label>Hangi Kitaptan</label><select id="w-book"><option value="">-- Kitap Seç --</option></select></div>
+  <button class="btn bg" onclick="saveWord()">Kaydet</button>
+  <button class="btn bo" onclick="closeOv('ov-word')">İptal</button>
+</div>
+</div>
+
+<!-- Book Detail -->
+<div class="ov" id="ov-det">
+<div class="mdl"><div class="mhdl"></div><div id="det-body"></div><button class="btn bo" onclick="closeOv('ov-det')">Kapat</button></div>
+</div>
+
+<!-- Word Detail -->
+<div class="ov" id="ov-wdet">
+<div class="mdl"><div class="mhdl"></div><div id="wdet-body"></div><button class="btn bo" onclick="closeOv('ov-wdet')">Kapat</button></div>
+</div>
+
+<!-- Journal Reader (fullscreen) -->
+<div class="ov" id="ov-jr" style="align-items:stretch;">
+<div class="mdl mdl-full" style="overflow-y:auto;">
+  <div class="jreader" id="jr-content"></div>
+</div>
+</div>
+
+<!-- GAME ARENA -->
+<div class="arena" id="arena">
+  <div class="atop">
+    <button class="abk" onclick="closeArena()">←</button>
+    <div class="atit" id="atit"></div>
+    <div class="asc" id="asc">0 puan</div>
+  </div>
+  <div class="abody" id="abody"></div>
+</div>
+
+<script>
+'use strict';
+/* ══════════════════════════════════════════
+   DATA
+══════════════════════════════════════════ */
+const K={B:'kt3_b',J:'kt3_j',V:'kt3_v',SC:'kt3_sc',XP:'kt3_xp',WOTD:'kt3_wotd'};
+function ld(k){ try{ return JSON.parse(localStorage.getItem(k)||'null'); }catch(e){ return null; } }
+
+let B=ld(K.B)||[], J=ld(K.J)||[], V=ld(K.V)||[], SC=ld(K.SC)||[], XP=ld(K.XP)||0;
+// Ensure XP is a valid number
+if(typeof XP !== 'number' || isNaN(XP)) XP = 0;
+
+let isDark = localStorage.getItem('kt3_theme') !== 'light';
+let curScr='home', vFilter='all', editBId=null, editWId=null, editJId=null;
+let selEmoji='📕', selStar=0, selJStar=0;
+let wotdData=null;
+
+function save(){
+  try{
+    localStorage.setItem(K.B,JSON.stringify(B));
+    localStorage.setItem(K.J,JSON.stringify(J));
+    localStorage.setItem(K.V,JSON.stringify(V));
+    localStorage.setItem(K.SC,JSON.stringify(SC));
+    localStorage.setItem(K.XP,String(XP));
+  }catch(e){ toast('⚠️ Kayıt başarısız! Depolama dolu olabilir.'); }
+}
+
+/* ══════════════════════════════════════════
+   THEME
+══════════════════════════════════════════ */
+function applyTheme(){
+  document.body.classList.toggle('light',!isDark);
+  const t=document.getElementById('thgtoggle');
+  if(t){ t.classList.toggle('on',isDark); }
+  document.getElementById('thbtn').textContent=isDark?'🌙':'☀️';
+  localStorage.setItem('kt3_theme',isDark?'dark':'light');
+}
+function toggleTheme(){ isDark=!isDark; applyTheme(); }
+
+/* ══════════════════════════════════════════
+   XP / LEVEL
+══════════════════════════════════════════ */
+const XP_PER_LV=500;
+function lvl(x){ return Math.floor(x/XP_PER_LV)+1; }
+function lvlPct(x){ return Math.round((x%XP_PER_LV)/XP_PER_LV*100); }
+
+function addXP(n){
+  const prev=lvl(XP); XP+=n;
+  if(lvl(XP)>prev) toast('🎉 Seviye '+lvl(XP)+'e ulaştın!');
+  save(); updateXPUI();
+}
+
+function updateXPUI(){
+  const lv=lvl(XP), pct=lvlPct(XP), prog=XP%XP_PER_LV;
+  const xpf=document.getElementById('xpfill');
+  const hxpf=document.getElementById('hxpf');
+  if(xpf) xpf.style.width=pct+'%';
+  if(hxpf) hxpf.style.width=pct+'%';
+  const lvtxt=document.getElementById('xplvtxt');
+  const xpnum=document.getElementById('xpnum');
+  const hxplv=document.getElementById('hxplv');
+  if(lvtxt) lvtxt.textContent='Seviye '+lv;
+  if(xpnum) xpnum.textContent=prog+' / '+XP_PER_LV+' XP';
+  if(hxplv) hxplv.textContent='Lvl '+lv;
+}
+
+/* ══════════════════════════════════════════
+   TOAST
+══════════════════════════════════════════ */
+let _tt;
+function toast(msg,dur=2400){
+  const el=document.getElementById('toast');
+  if(!el) return;
+  el.textContent=msg; el.classList.add('on');
+  clearTimeout(_tt); _tt=setTimeout(()=>el.classList.remove('on'),dur);
+}
+
+/* ══════════════════════════════════════════
+   UTIL
+══════════════════════════════════════════ */
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+const shuf=a=>[...a].sort(()=>Math.random()-.5);
+const pick=(a,n)=>shuf(a).slice(0,n);
+
+// Returns n distinct distractors (words different from w)
+function dist(w,n){
+  const pool=V.filter(v=>v.id!==w.id);
+  return pick(pool, Math.min(n, pool.length));
+}
+
+/* ══════════════════════════════════════════
+   RENDER ALL
+══════════════════════════════════════════ */
+function renderAll(){
+  document.getElementById('hdate').textContent=
+    new Date().toLocaleDateString('tr-TR',{weekday:'long',day:'numeric',month:'long'});
+  renderHome(); renderJournal(); renderVocab(); renderGames(); updateXPUI();
+}
+
+/* ══════════════════════════════════════════
+   HOME
+══════════════════════════════════════════ */
+function calcStreak(){
+  if(!J.length) return 0;
+  const dates=new Set(J.map(e=>e.date));
+  let s=0;
+  const d=new Date();
+  // Start from today; if today has no entry, streak may still count from yesterday
+  for(let i=0;i<365;i++){
+    const ds=d.toISOString().slice(0,10);
+    if(dates.has(ds)){ s++; d.setDate(d.getDate()-1); }
+    else {
+      // If i===0 (today) has no entry, check if yesterday starts a streak
+      if(i===0){ d.setDate(d.getDate()-1); continue; }
+      break;
+    }
+  }
+  return s;
+}
+
+function renderHome(){
+  const rd=B.filter(b=>b.status==='reading'), dn=B.filter(b=>b.status==='done');
+  const pg=J.reduce((s,e)=>s+Math.max(0,(e.pagesTo||0)-(e.pagesFrom||0)),0);
+  const str=calcStreak();
+  document.getElementById('st-tot').textContent=B.length;
+  document.getElementById('st-rd').textContent=rd.length;
+  document.getElementById('st-dn').textContent=dn.length;
+  document.getElementById('st-vc').textContent=V.length;
+  document.getElementById('st-pg').textContent=pg;
+  document.getElementById('st-str').textContent=str;
+
+  const allD=new Set(J.map(e=>e.date));
+  const sdEl=document.getElementById('sdots'); sdEl.innerHTML='';
+  const today=new Date().toISOString().slice(0,10);
+  for(let i=6;i>=0;i--){
+    const d=new Date(); d.setDate(d.getDate()-i);
+    const ds=d.toISOString().slice(0,10);
+    const dot=document.createElement('div');
+    if(allD.has(ds)){
+      dot.className='sd '+(ds===today?'now':'on');
+    } else {
+      dot.className='sd';
+    }
+    sdEl.appendChild(dot);
+  }
+
+  document.getElementById('h-reading').innerHTML=
+    rd.length?rd.map(bCard).join(''):'<div class="empty"><div class="ei">📖</div><p>Şu an okunan kitap yok.<br>Ekle butonuna bas!</p></div>';
+  document.getElementById('h-all').innerHTML=
+    B.length?B.map(bCard).join(''):'<div class="empty"><div class="ei">📚</div><p>Henüz kitap eklemedin.</p></div>';
+}
+
+function bCard(b){
+  const pct=b.totalPages?Math.round((b.currentPage||0)/b.totalPages*100):0;
+  const bc=b.status==='reading'?'br':b.status==='done'?'bd':'bp';
+  const bt=b.status==='reading'?'Okunuyor':b.status==='done'?'Tamamlandı':'Planlandı';
+  const bv=V.filter(v=>v.bookId===b.id).length;
+  return `<div class="bcard" onclick="openDet('${b.id}')">
+    <div class="bcov">${b.emoji||'📕'}</div>
+    <div class="binf">
+      <div class="btit">${esc(b.title)}</div>
+      <div class="baut">${esc(b.author||'')}</div>
+      <div class="bmeta">
+        <span class="badge ${bc}">${bt}</span>
+        ${b.rating?`<span style="font-size:10px;color:var(--gold)">${'⭐'.repeat(b.rating)}</span>`:''}
+        ${bv?`<span class="tag">🔤 ${bv}</span>`:''}
+      </div>
+      ${b.status==='reading'&&b.totalPages?`<div class="pbar"><div class="pfill" style="width:${pct}%"></div></div>
+      <div class="bpgt">${b.currentPage||0} / ${b.totalPages} sayfa · %${pct}</div>`:''}
+    </div>
+  </div>`;
+}
+
+/* ══════════════════════════════════════════
+   JOURNAL
+══════════════════════════════════════════ */
+function renderJournal(){
+  const el=document.getElementById('jlist');
+  if(!J.length){ el.innerHTML='<div class="empty"><div class="ei">✍️</div><p>Henüz günlük girişi yok.<br>Bugünkü okumayı kaydet!</p></div>'; return; }
+  const grp={};
+  [...J].sort((a,b)=>b.date.localeCompare(a.date)).forEach(e=>{ (grp[e.date]=grp[e.date]||[]).push(e); });
+  el.innerHTML=Object.keys(grp).map(date=>{
+    const lbl=new Date(date+'T12:00:00').toLocaleDateString('tr-TR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+    return `<div class="jdate">${lbl}</div>`+grp[date].map(e=>{
+      const bk=B.find(b=>b.id===e.bookId);
+      return `<div class="jcard" style="position:relative" onclick="openJReader('${e.id}')">
+        <button class="jedit" onclick="event.stopPropagation();openJournalModal('${e.id}')">✏️</button>
+        <button class="jdel" onclick="event.stopPropagation();delJournal('${e.id}')">✕</button>
+        <div class="jbook">📚 ${bk?esc(bk.title):'Bilinmeyen Kitap'}</div>
+        <div class="jtext">${esc(e.summary)}</div>
+        <div class="jfoot">
+          ${e.pagesFrom&&e.pagesTo?`<span>📄 ${e.pagesFrom}–${e.pagesTo} (${e.pagesTo-e.pagesFrom} s.)</span>`:''}
+          ${e.rating?`<span>${'⭐'.repeat(e.rating)}</span>`:''}
+          <span style="color:var(--gold);font-size:9px;">Tam okumak için dokun →</span>
+        </div>
+      </div>`;
+    }).join('');
+  }).join('');
+}
+
+function openJReader(id){
+  const e=J.find(x=>x.id===id); if(!e) return;
+  const bk=B.find(b=>b.id===e.bookId);
+  const dateStr=new Date(e.date+'T12:00:00').toLocaleDateString('tr-TR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  document.getElementById('jr-content').innerHTML=`
+    <button class="jreader-back" onclick="closeOv('ov-jr')">← Geri</button>
+    <div class="jreader-title">${bk?esc(bk.title):'Bilinmeyen Kitap'}</div>
+    <div class="jreader-meta">
+      <span>📅 ${dateStr}</span>
+      ${e.pagesFrom&&e.pagesTo?`<span>📄 ${e.pagesFrom}–${e.pagesTo}. sayfalar</span>`:''}
+      ${e.rating?`<span>${'⭐'.repeat(e.rating)}</span>`:''}
+    </div>
+    <div class="jreader-body">${esc(e.summary)}</div>
+    <div class="jreader-actions">
+      <button class="btn bg" style="flex:1;margin:0" onclick="closeOv('ov-jr');setTimeout(()=>openJournalModal('${e.id}'),200)">✏️ Düzenle</button>
+      <button class="btn bred" style="flex:0.5;margin:0" onclick="closeOv('ov-jr');setTimeout(()=>delJournal('${e.id}'),200)">🗑️</button>
+    </div>`;
+  openOv('ov-jr');
+}
+
+function delJournal(id){
+  if(!confirm('Bu günlük girişini sil?')) return;
+  J=J.filter(e=>e.id!==id); save(); renderAll(); toast('🗑️ Günlük silindi');
+}
+
+/* ══════════════════════════════════════════
+   WORD OF THE DAY
+══════════════════════════════════════════ */
+const TR_WORDS=[
+  {word:'Müstesna',mean:'Sıradan olanın dışında, seçkin ve olağanüstü.',ex:'Bu müstesna eser yüzyıllar boyunca okundu.'},
+  {word:'Bedihe',mean:'Kendiliğinden, düşünmeden söylenen; anında hazırlanan söz veya şiir.',ex:'Bedihe söyleme kabiliyeti onu şair yapıyordu.'},
+  {word:'Mütereddit',mean:'Kararsız, tereddütlü, ne yapacağını bilemeyen.',ex:'Mütereddit adımlarla odaya girdi.'},
+  {word:'Tazarru',mean:'Yalvarmak, yalvarıp yakarmak, dua etmek.',ex:'Gökyüzüne tazarrularla seslendi.'},
+  {word:'Nevzuhur',mean:'Yeni ortaya çıkmış, henüz yeni türemiş.',ex:'Nevzuhur kavramlar dili zenginleştirdi.'},
+  {word:'Hüzün',mean:'Derin bir üzüntü ve melankolinin karışımı olan duygu durumu.',ex:"İstanbul'un sisli sabahlarında bir hüzün vardır."},
+  {word:'Meram',mean:'Anlatmak, bildirmek istenen şey; maksat, niyet, gaye.',ex:'Meramını anlatamadı.'},
+  {word:'Sükût',mean:'Sessizlik, suskunluk; konuşmama hali.',ex:'Sükût bazen en güçlü cevaptır.'},
+  {word:'İtina',mean:'Özen gösterme, dikkat etme, titizlik.',ex:'Her işini itina ile yapardı.'},
+  {word:'Nevale',mean:'Yiyecek, erzak; yolculukta yanına alınan yiyecek.',ex:'Yolculuk için nevale hazırladılar.'},
+  {word:'Hicap',mean:'Utanma, mahcubiyet, ar.',ex:'Yaptıklarından hicap duyuyordu.'},
+  {word:'Lütuf',mean:'İyilik, bağış, ihsan; nazik ve kibar davranış.',ex:'Bu lütuf hiç unutulmadı.'},
+  {word:'Mecaz',mean:'Bir sözcüğün gerçek anlamı dışında başka bir anlam için kullanılması.',ex:'Dili mecazlarla zenginleştirdi.'},
+  {word:'Feraset',mean:'Anlayış kabiliyeti, zekâ, sezgi.',ex:'Büyük bir feraset sahibiydi.'},
+  {word:'Tefekkür',mean:'Derin düşünme, düşünüp taşınma, fikir yürütme.',ex:'Saatlerce tefekkür etti.'},
+  {word:'Hasret',mean:'Uzakta olan sevilen bir şeye ya da kişiye duyulan derin özlem.',ex:'Memleket hasreti içinde yaşadı.'},
+  {word:'İstifham',mean:'Anlamamazlıktan gelerek soru sorma; sorgulama sanatı.',ex:'Yüzündeki istifham gülümsemeye dönüştü.'},
+  {word:'Mübhem',mean:'Kapalı, belirsiz, anlaşılması güç olan.',ex:'Cevabı mübhemdi.'},
+  {word:'Rindane',mean:'Dünya kaygısından uzak, dervişçe ve özgür yaşayan kişiye yakışır biçimde.',ex:'Rindane bir hayat sürdü.'},
+  {word:'Mahiyet',mean:'Bir şeyin gerçek yapısı, özü, niteliği.',ex:'Olayın mahiyetini tam anlayamadı.'},
+  {word:'Teessür',mean:'Üzüntü, keder, acı.',ex:'Haberi duyunca derin teessür duydu.'},
+  {word:'Vecd',mean:'Dini ya da sanatsal bir coşkunun verdiği derin duygu hali, esrime.',ex:'Müziği dinlerken vecd içine girdi.'},
+  {word:'Kıvam',mean:'Bir maddenin yoğunluk ve tutarlılık derecesi; en uygun durum.',ex:'Çorba tam kıvamına geldi.'},
+  {word:'Şefkat',mean:'Acıma ve sevgi karışımı sıcak duygu; merhametli ilgi.',ex:'Şefkatle baktı.'},
+  {word:'Muştu',mean:'Sevinçli haber, müjde.',ex:'Muştusunu bekliyordu.'},
+  {word:'Özge',mean:'Başka, farklı, ayrı; olağandışı.',ex:'Özge bir güzelliği vardı.'},
+  {word:'Tılsım',mean:'Büyülü nesne ya da söz; gizem, büyü.',ex:'O kelimelerde bir tılsım vardı.'},
+  {word:'Derviş',mean:'Dünya nimetlerine bağlı olmayan, kanaatkâr, mütevazı kişi.',ex:'Derviş gibi yaşadı.'},
+  {word:'Fettan',mean:'Çok çekici, büyüleyici, insanı etkisi altına alan.',ex:'Fettan gülüşü herkesi etkilerdi.'},
+  {word:'Gönül',mean:'Duygu ve sevginin merkezi; kalp, içtenlik.',ex:'Gönlünü söz yaptı.'},
+  {word:'Tevekkül',mean:'Allah\'a sığınarak sonucu O\'na bırakma; kaderci bir güven.',ex:'Tevekkül ile bekledi.'},
+  {word:'Mağrur',mean:'Kibirli, gururlu, büyüklenen.',ex:'Mağrur tavırları onu yalnız bıraktı.'},
+  {word:'Feyiz',mean:'Bereket, bolluk; bilgi ve ilham kaynağı.',ex:'O kitaptan çok feyiz aldı.'},
+  {word:'Sevinç',mean:'Mutluluk veren duygu; içten gelen neşe.',ex:'Sevinçle haberini paylaştı.'},
+  {word:'Zarif',mean:'İnce, nazik, kibar; estetik açıdan güzel olan.',ex:'Zarif bir kalem tutuşu vardı.'},
+];
+
+/* ══════════════════════════════════════════
+   API KEY MANAGEMENT
+══════════════════════════════════════════ */
+function getApiKey(){ return localStorage.getItem('kt3_apikey')||''; }
+
+function saveApiKey(){
+  const key=(document.getElementById('apikey-input').value||'').trim();
+  if(!key){ toast('⚠️ API anahtarı boş olamaz!'); return; }
+  if(!key.startsWith('sk-ant-')){ toast('⚠️ Geçerli bir Anthropic API anahtarı gir (sk-ant-…)'); return; }
+  localStorage.setItem('kt3_apikey',key);
+  updateApiKeyStatus();
+  closeOv('ov-apikey');
+  toast('✅ API anahtarı kaydedildi!');
+  // Force refresh WOTD with new key
+  try{ localStorage.removeItem(K.WOTD); }catch(e){}
+  loadWOTD();
+}
+
+function toggleApiKeyVis(){
+  const inp=document.getElementById('apikey-input');
+  const btn=document.getElementById('apikey-vis-btn');
+  if(!inp||!btn) return;
+  if(inp.type==='password'){ inp.type='text'; btn.textContent='🙈'; }
+  else { inp.type='password'; btn.textContent='👁️'; }
+}
+
+function updateApiKeyStatus(){
+  const key=getApiKey();
+  const status=document.getElementById('apikey-status');
+  const btn=document.getElementById('apikey-btn');
+  if(status){
+    if(key){ status.textContent='✅ Bağlandı — Claude AI aktif'; status.style.color='var(--grl)'; }
+    else { status.textContent='Günün kelimesini AI ile üret'; status.style.color=''; }
+  }
+  if(btn){ btn.textContent=key?'Değiştir':'Gir'; }
+  // Pre-fill input if key exists (masked)
+  const inp=document.getElementById('apikey-input');
+  if(inp&&key) inp.value=key;
+}
+
+/* ══════════════════════════════════════════
+   WORD OF THE DAY — Claude AI + Fallback
+══════════════════════════════════════════ */
+// WOTD loading states
+let wotdLoading=false;
+
+function wotdLoadingState(){
+  const wEl=document.getElementById('wotd-word');
+  const mEl=document.getElementById('wotd-mean');
+  const sEl=document.getElementById('wotd-src');
+  const btn=document.getElementById('wotd-addbtn');
+  if(wEl) wEl.innerHTML='<span style="display:inline-block;animation:wotdpulse 1.2s ease-in-out infinite;opacity:.5">✨ Kelime yükleniyor…</span>';
+  if(mEl) mEl.textContent='Claude AI ile özel kelime üretiliyor';
+  if(sEl) sEl.textContent='';
+  if(btn){ btn.textContent='…'; btn.className='wotd-add'; btn.style.opacity='.4'; btn.onclick=null; }
+}
+
+// Inject pulse keyframe once
+(function(){
+  const s=document.createElement('style');
+  s.textContent='@keyframes wotdpulse{0%,100%{opacity:.3}50%{opacity:.9}}';
+  document.head.appendChild(s);
+})();
+
+async function fetchWOTDFromClaude(apiKey, usedWords){
+  // Build a list of words already seen so Claude picks something new
+  const usedList=usedWords.length>0?`\nDaha önce kullanılan kelimeler (bunları KULLANMA): ${usedWords.join(', ')}`:'';
+  const prompt=`Sen bir Türk dili ve edebiyatı uzmanısın. Bugün için tek bir nadir, edebi veya zengin anlamlı Türkçe kelime seç.${usedList}
+
+Yalnızca şu JSON formatında cevap ver, başka hiçbir şey yazma:
+{
+  "word": "Kelime",
+  "meaning": "Kelimenin tam ve açıklayıcı anlamı (1-2 cümle)",
+  "example": "Kelimeyi içeren doğal ve güzel bir örnek cümle.",
+  "etymology": "Kısa köken bilgisi (Arapça/Farsça/Türkçe vb.)"
+}`;
+
+  const response=await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'x-api-key':apiKey,
+      'anthropic-version':'2023-06-01',
+      'anthropic-dangerous-direct-browser-access':'true'
+    },
+    body:JSON.stringify({
+      model:'claude-haiku-4-5-20251001',
+      max_tokens:300,
+      messages:[{role:'user',content:prompt}]
+    })
+  });
+
+  if(!response.ok){
+    const err=await response.json().catch(()=>({}));
+    throw new Error(err?.error?.message||`HTTP ${response.status}`);
+  }
+
+  const data=await response.json();
+  const text=data.content?.[0]?.text||'';
+  // Parse JSON from response (strip any markdown fences)
+  const clean=text.replace(/```json|```/g,'').trim();
+  const parsed=JSON.parse(clean);
+  if(!parsed.word||!parsed.meaning) throw new Error('Geçersiz API yanıtı');
+  return parsed;
+}
+
+async function loadWOTD(){
+  if(wotdLoading) return;
+  const today=new Date().toISOString().slice(0,10);
+  const cached=ld(K.WOTD);
+
+  // If today's word is already cached, just show it
+  if(cached&&cached.date===today){ wotdData=cached; renderWOTD(); return; }
+
+  const apiKey=getApiKey();
+
+  if(apiKey){
+    // Try Claude AI
+    wotdLoading=true;
+    wotdLoadingState();
+
+    // Collect previously used WOTD words to avoid repetition
+    let usedWords=[];
+    try{ usedWords=JSON.parse(localStorage.getItem('kt3_wotd_hist')||'[]'); }catch(e){}
+
+    try{
+      const result=await fetchWOTDFromClaude(apiKey, usedWords);
+      wotdData={
+        date:today,
+        word:result.word,
+        mean:result.meaning,
+        ex:result.example||'',
+        etymology:result.etymology||'',
+        src:'✨ Claude AI tarafından önerildi'
+      };
+      // Save to history (keep last 60)
+      usedWords.push(result.word);
+      if(usedWords.length>60) usedWords.shift();
+      try{ localStorage.setItem('kt3_wotd_hist',JSON.stringify(usedWords)); }catch(e){}
+      try{ localStorage.setItem(K.WOTD,JSON.stringify(wotdData)); }catch(e){}
+      wotdLoading=false;
+      renderWOTD();
+      return;
+    }catch(err){
+      wotdLoading=false;
+      console.warn('Claude WOTD hatası:',err.message);
+      // Show error with retry button, fall through to local fallback
+      const srcEl=document.getElementById('wotd-src');
+      if(srcEl) srcEl.textContent='⚠️ AI bağlantı hatası — yerel kelime gösteriliyor';
+    }
+  }
+
+  // FALLBACK: local curated word list
+  const dayOfYear=Math.floor((new Date()-new Date(new Date().getFullYear(),0,0))/(1000*60*60*24));
+  const w=TR_WORDS[dayOfYear%TR_WORDS.length];
+  wotdData={date:today,word:w.word,mean:w.mean,ex:w.ex,src:'📚 Seçilmiş Türkçe Kelimesi'};
+  try{ localStorage.setItem(K.WOTD,JSON.stringify(wotdData)); }catch(e){}
+  renderWOTD();
+}
+
+function renderWOTD(){
+  if(!wotdData) return;
+  const wordEl=document.getElementById('wotd-word');
+  const meanEl=document.getElementById('wotd-mean');
+  const srcEl=document.getElementById('wotd-src');
+  const btn=document.getElementById('wotd-addbtn');
+  if(wordEl) wordEl.textContent=wotdData.word;
+  if(meanEl){
+    meanEl.textContent=wotdData.mean;
+    // Show etymology if available
+    if(wotdData.etymology){
+      meanEl.innerHTML=meanEl.textContent+
+        `<div style="font-size:10px;color:var(--pul);margin-top:4px;font-style:italic;">📜 ${esc(wotdData.etymology)}</div>`;
+    }
+  }
+  if(srcEl) srcEl.textContent=wotdData.src||'';
+  if(!btn) return;
+  btn.style.opacity='1';
+  const already=V.find(v=>v.word.toLowerCase()===wotdData.word.toLowerCase());
+  if(already){
+    btn.textContent='✓ Eklendi';
+    btn.className='wotd-add wotd-added';
+    btn.onclick=null;
+  } else {
+    btn.textContent='+ Ekle';
+    btn.className='wotd-add';
+    btn.onclick=addWOTD;
+  }
+}
+
+function addWOTD(){
+  if(!wotdData) return;
+  if(V.find(v=>v.word.toLowerCase()===wotdData.word.toLowerCase())){
+    toast('⚠️ Bu kelime zaten listede!'); return;
+  }
+  V.push({
+    id:uid(),word:wotdData.word,meaning:wotdData.mean,
+    example:wotdData.ex||'',bookId:null,
+    addedAt:new Date().toISOString(),seen:0,correct:0,fromWOTD:true
+  });
+  save(); renderAll(); renderWOTD();
+  toast('✅ Günün kelimesi eklendi!');
+}
+
+function refreshWOTD(){
+  // Force a new word fetch (bypasses cache)
+  const apiKey=getApiKey();
+  if(!apiKey){ toast('⚠️ API anahtarı gerekli! Ayarlar\'dan gir.'); return; }
+  try{ localStorage.removeItem(K.WOTD); }catch(e){}
+  wotdData=null; wotdLoading=false;
+  loadWOTD();
+  toast('🔄 Yeni kelime yükleniyor…');
+}
+
+/* ══════════════════════════════════════════
+   VOCAB
+══════════════════════════════════════════ */
+function mastery(w){
+  const c=w.correct||0;
+  if(c>=5) return 'mastered';
+  if(c>=2||(w.seen||0)>=3) return 'learning';
+  return 'new';
+}
+
+function setVF(f,el){
+  vFilter=f;
+  document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('on'));
+  el.classList.add('on');
+  renderVocab();
+}
+
+function renderVocab(){
+  const q=(document.getElementById('vq')?document.getElementById('vq').value:'').toLowerCase();
+  const fil=V.filter(w=>{
+    const mok=vFilter==='all'||mastery(w)===vFilter;
+    const qok=!q||w.word.toLowerCase().includes(q)||(w.meaning||'').toLowerCase().includes(q);
+    return mok&&qok;
+  });
+  const vcAll=document.getElementById('vc-all');
+  if(vcAll) vcAll.textContent='('+V.length+')';
+  const el=document.getElementById('vlist');
+  if(!el) return;
+  if(!fil.length){
+    el.innerHTML='<div class="empty"><div class="ei">🔤</div><p>'+(q?'Arama sonucu bulunamadı.':'Henüz kelime eklemedin!')+'</p></div>';
+    return;
+  }
+  el.innerHTML=fil.map(w=>{
+    const m=mastery(w), bk=B.find(b=>b.id===w.bookId);
+    const dots=[1,2,3,4,5].map(i=>`<div class="md${(w.correct||0)>=i?' on':''}"></div>`).join('');
+    const ml=m==='mastered'?'✅ Öğrenildi':m==='learning'?'📈 Öğreniliyor':'🆕 Yeni';
+    const mean=w.meaning||'';
+    return `<div class="vcard" onclick="openWDet('${w.id}')">
+      <div class="vlet">${(w.word[0]||'?').toUpperCase()}</div>
+      <div style="flex:1;min-width:0;">
+        <div class="vword">${esc(w.word)}</div>
+        <div class="vmean">${esc(mean.length>80?mean.slice(0,80)+'…':mean)}</div>
+        ${bk?`<div class="vref">📖 ${esc(bk.title)}</div>`:''}
+        <div class="mrow"><div style="display:flex;gap:3px;">${dots}</div><span class="mtxt">${ml}</span></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ══════════════════════════════════════════
+   GAMES
+══════════════════════════════════════════ */
+const GMODES=[
+  {id:'qa',    ic:'❓',nm:'Soru & Cevap',  ds:'Kelimeyi gör, anlamı seç',  min:4},
+  {id:'rev',   ic:'🔄',nm:'Ters Çeviri',   ds:'Anlamı gör, kelimeyi seç',  min:4},
+  {id:'match', ic:'🧩',nm:'Eşleştirme',    ds:'Kelime-anlam çiftleri bul', min:4},
+  {id:'fc',    ic:'🃏',nm:'Flashcard',     ds:'Kartı çevir, test et',      min:2},
+  {id:'fill',  ic:'✏️',nm:'Boşluk Doldur', ds:'Eksik kelimeyi bul',        min:4},
+  {id:'spell', ic:'🔡',nm:'Yazım Testi',   ds:'Harfleri doğru diz',        min:2},
+];
+
+function bestSc(gid){ const s=SC.filter(x=>x.game===gid); return s.length?Math.max(...s.map(x=>x.score)):null; }
+
+function renderGames(){
+  const n=V.length;
+  document.getElementById('gh-ic').textContent=n<2?'📚':'🎯';
+  document.getElementById('gh-tit').textContent=n<2?`${n}/2 Kelime Gerekli`:`${n} Kelimeyle Hazır!`;
+  document.getElementById('gh-sub').textContent=n<2?'En az 2 kelime ekle.':'Bir mod seç, pratik yap!';
+  document.getElementById('ggrid').innerHTML=GMODES.map(g=>{
+    const ok=n>=g.min, bs=bestSc(g.id);
+    return `<div class="gtile${ok?'':' dim'}" onclick="${ok?`startGame('${g.id}')`:`toast('⚠️ Bu mod için en az ${g.min} kelime gerekli!')`}">
+      <div class="gtic">${g.ic}</div><div class="gtnm">${g.nm}</div><div class="gtds">${g.ds}</div>
+      ${bs!==null?`<div class="gtbs">🏆 ${bs}</div>`:''}
+    </div>`;
+  }).join('');
+  const rec=[...SC].reverse().slice(0,6);
+  document.getElementById('slist').innerHTML=rec.length?rec.map(s=>{
+    const gm=GMODES.find(g=>g.id===s.game)||{ic:'?',nm:'?'};
+    const pct=s.total?Math.round(s.correct/s.total*100):0;
+    return `<div class="shrow">
+      <div><div class="shg">${gm.ic} ${gm.nm}</div><div class="shd">${new Date(s.date).toLocaleDateString('tr-TR')}</div></div>
+      <div><div class="shs">${s.score}</div><div class="sha">%${pct} · ${s.correct}/${s.total}</div></div>
+    </div>`;
+  }).join(''):'<div class="empty" style="padding:22px 0"><p>Henüz oyun oynamadın</p></div>';
+}
+
+/* ══════════════════════════════════════════
+   GAME ENGINE
+══════════════════════════════════════════ */
+let GS={}, activeG=null;
+
+function startGame(gid){
+  const gm=GMODES.find(g=>g.id===gid);
+  if(!gm||V.length<gm.min){ toast(`⚠️ Bu mod için en az ${gm?.min||4} kelime gerekli!`); return; }
+  activeG=gid;
+  document.getElementById('atit').textContent=gm.ic+' '+gm.nm;
+  document.getElementById('asc').textContent='0 puan';
+  document.getElementById('arena').classList.add('on');
+  GS={game:gid,score:0,correct:0,wrong:0,total:0,hist:[]};
+  ({qa:gQA,rev:gRev,match:gMatch,fc:gFC,fill:gFill,spell:gSpell})[gid]?.();
+}
+
+function closeArena(){ document.getElementById('arena').classList.remove('on'); activeG=null; renderGames(); }
+function updSc(){ document.getElementById('asc').textContent=GS.score+' puan'; }
+
+function finishGame(){
+  SC.push({game:activeG,score:GS.score,correct:GS.correct,total:GS.total,date:new Date().toISOString()});
+  if(SC.length>80) SC.shift();
+  addXP(GS.score);
+  save();
+}
+
+function showResult(){
+  finishGame();
+  const pct=GS.total?Math.round(GS.correct/GS.total*100):0;
+  const ic=pct>=90?'🏆':pct>=70?'🌟':pct>=50?'👍':'💪';
+  const msg=pct>=90?'Mükemmel!':pct>=70?'Çok İyi!':pct>=50?'Güzel!':'Devam Et!';
+  document.getElementById('abody').innerHTML=`<div class="result">
+    <div class="ric">${ic}</div><div class="rtit">${msg}</div>
+    <div class="rsc">${GS.score}</div><div class="rsub">puan · +${GS.score} XP</div>
+    <div class="rtbl">
+      <div class="rrow"><span>✅ Doğru</span><span style="color:var(--grl)">${GS.correct}</span></div>
+      <div class="rrow"><span>❌ Yanlış</span><span style="color:var(--rdl)">${GS.wrong}</span></div>
+      <div class="rrow"><span>🎯 Başarı</span><span style="color:var(--gold)">%${pct}</span></div>
+    </div>
+    <button class="btn bg" onclick="startGame('${activeG}')">🔄 Tekrar</button>
+    <button class="btn bo" onclick="closeArena()">← Menü</button>
+  </div>`;
+}
+
+function pdots(hist,tot,cur){
+  return `<div class="pdots">${Array.from({length:tot},(_,i)=>
+    i<hist.length?`<div class="pd ${hist[i]?'c':'w'}"></div>`:
+    i===cur?'<div class="pd cur"></div>':'<div class="pd"></div>'
+  ).join('')}</div>`;
+}
+
+function sbanner(extra=''){
+  return `<div class="sbanner">
+    <div class="sp2"><div class="sp2-n">${GS.score}</div><div class="sp2-l">Puan</div></div>
+    <div class="sp2"><div class="sp2-n">${GS.correct}</div><div class="sp2-l">Doğru</div></div>
+    ${extra}</div>`;
+}
+
+/* ── QA ── */
+function gQA(){ GS.words=pick(V,Math.min(10,V.length)); GS.idx=0; GS.total=GS.words.length; rQA(); }
+function rQA(){
+  if(GS.idx>=GS.words.length){ showResult(); return; }
+  const w=GS.words[GS.idx]; w.seen=(w.seen||0)+1;
+  const distractors=dist(w,3);
+  const opts=shuf([w,...distractors]);
+  document.getElementById('abody').innerHTML=
+    pdots(GS.hist,GS.total,GS.idx)+
+    sbanner(`<div class="sp2"><div class="sp2-n">${GS.idx+1}/${GS.total}</div><div class="sp2-l">Soru</div></div>`)+
+    `<div class="qacard"><div class="qaword">${esc(w.word)}</div><div class="qahint">Bu kelimenin anlamı nedir?</div></div>
+    <div class="qaopts">${opts.map(o=>`<button class="qaopt" onclick="ansQA('${w.id}','${o.id}')" data-id="${o.id}">${esc((o.meaning||'').length>70?(o.meaning||'').slice(0,70)+'…':(o.meaning||''))}</button>`).join('')}</div>`;
+}
+function ansQA(correctId,chosenId){
+  const ok=correctId===chosenId;
+  const w=V.find(v=>v.id===correctId);
+  if(ok){ if(w) w.correct=(w.correct||0)+1; GS.score+=100; GS.correct++; }
+  else GS.wrong++;
+  GS.hist.push(ok); save();
+  document.querySelectorAll('.qaopt').forEach(b=>{
+    b.disabled=true;
+    if(b.dataset.id===correctId) b.classList.add('ok');
+    else if(b.dataset.id===chosenId&&!ok) b.classList.add('bad');
+  });
+  updSc();
+  const fb=document.createElement('div');
+  fb.className='qafb '+(ok?'ok':'bad');
+  fb.textContent=ok?'✅ Doğru! +100':'❌ Yanlış!';
+  const opts=document.querySelector('.qaopts');
+  if(opts) opts.after(fb);
+  setTimeout(()=>{ GS.idx++; rQA(); },1100);
+}
+
+/* ── REVERSE ── */
+function gRev(){ GS.words=pick(V,Math.min(10,V.length)); GS.idx=0; GS.total=GS.words.length; rRev(); }
+function rRev(){
+  if(GS.idx>=GS.words.length){ showResult(); return; }
+  const w=GS.words[GS.idx];
+  const distractors=dist(w,3);
+  const opts=shuf([w,...distractors]);
+  const mean=w.meaning||'';
+  document.getElementById('abody').innerHTML=
+    pdots(GS.hist,GS.total,GS.idx)+
+    sbanner(`<div class="sp2"><div class="sp2-n">${GS.idx+1}/${GS.total}</div><div class="sp2-l">Soru</div></div>`)+
+    `<div class="qacard">
+      <div class="qahint" style="font-size:13px;color:var(--text);line-height:1.6;margin-bottom:5px;">"${esc(mean.length>130?mean.slice(0,130)+'…':mean)}"</div>
+      <div class="qahint">Hangi kelime?</div>
+    </div>
+    <div class="qaopts">${opts.map(o=>`<button class="qaopt" onclick="ansRev('${w.id}','${o.id}')" data-id="${o.id}" style="font-family:'Playfair Display',serif;font-size:15px;">${esc(o.word)}</button>`).join('')}</div>`;
+}
+function ansRev(correctId,chosenId){
+  const ok=correctId===chosenId;
+  const w=V.find(v=>v.id===correctId);
+  if(ok){ if(w) w.correct=(w.correct||0)+1; GS.score+=100; GS.correct++; }
+  else GS.wrong++;
+  GS.hist.push(ok); save();
+  document.querySelectorAll('.qaopt').forEach(b=>{
+    b.disabled=true;
+    if(b.dataset.id===correctId) b.classList.add('ok');
+    else if(b.dataset.id===chosenId&&!ok) b.classList.add('bad');
+  });
+  updSc();
+  const fb=document.createElement('div');
+  fb.className='qafb '+(ok?'ok':'bad');
+  fb.textContent=ok?'✅ Doğru! +100':'❌ Yanlış!';
+  const opts=document.querySelector('.qaopts');
+  if(opts) opts.after(fb);
+  setTimeout(()=>{ GS.idx++; rRev(); },1100);
+}
+
+/* ── MATCH ── */
+function gMatch(){
+  const cnt=Math.min(4,V.length);
+  GS.mW=pick(V,cnt);
+  GS.mPaired=[];   // IDs of matched pairs
+  GS.mSel=null;    // currently selected {id, side}
+  GS.total=cnt;
+  GS.correct=0; GS.wrong=0;
+  rMatch();
+}
+function rMatch(){
+  const wc=shuf([...GS.mW]);
+  const mc=shuf([...GS.mW]);
+  document.getElementById('abody').innerHTML=
+    sbanner(`<div class="sp2"><div class="sp2-n">${GS.mPaired.length}/${GS.total}</div><div class="sp2-l">Eşleşme</div></div>`)+
+    `<p style="font-size:10px;color:var(--muted);text-align:center;margin-bottom:10px;">Kelime ve anlamı eşleştir</p>
+    <div class="matchcols">
+      <div>${wc.map(w=>{
+        const done=GS.mPaired.includes(w.id);
+        return `<div class="mc word${done?' done':''}" onclick="${done?'':''}" data-id="${w.id}" data-s="w">${esc(w.word)}</div>`;
+      }).join('')}</div>
+      <div>${mc.map(w=>{
+        const done=GS.mPaired.includes(w.id);
+        const mean=w.meaning||'';
+        return `<div class="mc mean${done?' done':''}" data-id="${w.id}" data-s="m">${esc(mean.length>42?mean.slice(0,42)+'…':mean)}</div>`;
+      }).join('')}</div>
+    </div>`;
+  // Attach click handlers after render
+  document.querySelectorAll('.mc:not(.done)').forEach(el=>{
+    el.addEventListener('click',()=>selM(el.dataset.id, el.dataset.s));
+  });
+}
+function selM(id,side){
+  if(GS.mPaired.includes(id)) return;
+  if(!GS.mSel){
+    GS.mSel={id,side};
+    const el=document.querySelector(`.mc[data-id="${id}"][data-s="${side}"]`);
+    if(el) el.classList.add('sel');
+  } else {
+    const prev=GS.mSel;
+    if(prev.id===id&&prev.side===side){
+      // Tapped same tile — deselect
+      const el=document.querySelector(`.mc[data-id="${id}"][data-s="${side}"]`);
+      if(el) el.classList.remove('sel');
+      GS.mSel=null;
+      return;
+    }
+    if(prev.id===id&&prev.side!==side){
+      // CORRECT MATCH
+      GS.mPaired.push(id);
+      GS.score+=150; GS.correct++;
+      GS.hist.push(true);
+      const w=V.find(v=>v.id===id);
+      if(w) w.correct=(w.correct||0)+1;
+      save(); updSc();
+      toast('✅ Eşleşti! +150');
+      GS.mSel=null;
+      if(GS.mPaired.length>=GS.total){
+        setTimeout(showResult,600);
+      } else {
+        rMatch();
+      }
+    } else {
+      // WRONG
+      const prevEl=document.querySelector(`.mc[data-id="${prev.id}"][data-s="${prev.side}"]`);
+      const curEl=document.querySelector(`.mc[data-id="${id}"][data-s="${side}"]`);
+      [prevEl,curEl].forEach(el=>{
+        if(el){ el.classList.remove('sel'); el.classList.add('err'); setTimeout(()=>el.classList.remove('err'),350); }
+      });
+      GS.wrong++;
+      GS.hist.push(false);
+      GS.mSel=null;
+    }
+  }
+}
+
+/* ── FLASHCARD ── */
+function gFC(){ GS.words=pick(V,Math.min(12,V.length)); GS.idx=0; GS.total=GS.words.length; rFC(); }
+function rFC(){
+  if(GS.idx>=GS.words.length){ showResult(); return; }
+  const w=GS.words[GS.idx], bk=B.find(b=>b.id===w.bookId);
+  document.getElementById('abody').innerHTML=
+    pdots(GS.hist,GS.total,GS.idx)+
+    sbanner(`<div class="sp2"><div class="sp2-n">${GS.idx+1}/${GS.total}</div><div class="sp2-l">Kart</div></div>`)+
+    `<p style="font-size:10px;color:var(--muted);text-align:center;margin-bottom:10px;">Kartı çevirmek için dokun</p>
+    <div class="fcwrap" onclick="flipFC()"><div class="fc" id="fcc">
+      <div class="fcface fcfront">
+        <div class="fcword">${esc(w.word)}</div>
+        <div class="fctap">👆 Anlamı görmek için dokun</div>
+      </div>
+      <div class="fcface fcback">
+        <div class="fcmean">${esc(w.meaning||'')}</div>
+        ${w.example?`<div class="fcex">"${esc(w.example)}"</div>`:''}
+        ${bk?`<div class="fcsrc">📖 ${esc(bk.title)}</div>`:''}
+      </div>
+    </div></div>
+    <div class="fcacts" id="fcacts" style="display:none">
+      <button class="fcbtn fcnope" onclick="ansFC(false)">❌ Bilmedim</button>
+      <button class="fcbtn fcknow" onclick="ansFC(true)">✅ Bildim!</button>
+    </div>`;
+}
+function flipFC(){
+  const fc=document.getElementById('fcc');
+  if(fc) fc.classList.toggle('flip');
+  const a=document.getElementById('fcacts');
+  if(a) a.style.display='flex';
+}
+function ansFC(knew){
+  const w=GS.words[GS.idx];
+  if(knew){
+    if(w) w.correct=(w.correct||0)+1;
+    GS.score+=80; GS.correct++;
+  } else {
+    if(w) w.correct=Math.max(0,(w.correct||1)-1);
+    GS.wrong++;
+  }
+  if(w) w.seen=(w.seen||0)+1;
+  GS.hist.push(knew); save(); updSc();
+  GS.idx++; rFC();
+}
+
+/* ── FILL IN THE BLANK ── */
+function gFill(){
+  // Prefer words with example sentences containing the word itself
+  const withEx=V.filter(v=>v.example&&v.example.toLowerCase().includes(v.word.toLowerCase()));
+  const pool=withEx.length>=4?withEx:V;
+  GS.words=pick(pool,Math.min(8,pool.length));
+  GS.idx=0; GS.total=GS.words.length; rFill();
+}
+function rFill(){
+  if(GS.idx>=GS.words.length){ showResult(); return; }
+  const w=GS.words[GS.idx];
+  const distractors=dist(w,3);
+  const opts=shuf([w,...distractors]);
+
+  // Build sentence display safely (no raw HTML injection)
+  let sentHTML;
+  if(w.example&&w.example.toLowerCase().includes(w.word.toLowerCase())){
+    // Safe: split by word (case-insensitive), then escape parts and insert blank
+    const parts=w.example.split(new RegExp('('+w.word.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','i'));
+    sentHTML=parts.map((p,i)=>{
+      if(p.toLowerCase()===w.word.toLowerCase()) return `<span class="fillblk" id="fblk">___</span>`;
+      return esc(p);
+    }).join('');
+  } else {
+    sentHTML=`<span class="fillblk" id="fblk">___</span> : ${esc(w.meaning||'')}`;
+  }
+
+  document.getElementById('abody').innerHTML=
+    pdots(GS.hist,GS.total,GS.idx)+
+    sbanner(`<div class="sp2"><div class="sp2-n">${GS.idx+1}/${GS.total}</div><div class="sp2-l">Soru</div></div>`)+
+    `<div class="fillsent">${sentHTML}</div>
+    <p style="font-size:10px;color:var(--muted);margin-bottom:8px;">Boşluğa gelmesi gereken kelimeyi seç:</p>
+    <div class="fillopts">${opts.map(o=>`<button class="fillchip" data-id="${o.id}">${esc(o.word)}</button>`).join('')}</div>`;
+
+  // Attach handlers
+  document.querySelectorAll('.fillchip').forEach(btn=>{
+    btn.addEventListener('click',()=>ansFill(w.id,btn.dataset.id,btn));
+  });
+}
+function ansFill(correctId,chosenId,el){
+  const ok=correctId===chosenId;
+  const w=V.find(v=>v.id===correctId);
+  document.querySelectorAll('.fillchip').forEach(c=>{ c.onclick=null; c.style.pointerEvents='none'; });
+  if(ok){
+    el.classList.add('ok');
+    const blk=document.getElementById('fblk');
+    if(blk&&w){ blk.textContent=w.word; blk.classList.add('ans'); }
+    if(w) w.correct=(w.correct||0)+1;
+    GS.score+=100; GS.correct++;
+    toast('✅ +100');
+  } else {
+    el.classList.add('bad');
+    // Reveal the correct option
+    document.querySelectorAll('.fillchip').forEach(c=>{
+      if(c.dataset.id===correctId) c.classList.add('hint');
+    });
+    GS.wrong++;
+  }
+  GS.hist.push(ok); save(); updSc();
+  setTimeout(()=>{ GS.idx++; rFill(); },1400);
+}
+
+/* ── SPELL ── */
+function gSpell(){
+  GS.words=pick(V,Math.min(8,V.length));
+  GS.idx=0; GS.total=GS.words.length;
+  nextSpell();
+}
+function nextSpell(){
+  if(GS.idx>=GS.words.length){ showResult(); return; }
+  const w=GS.words[GS.idx];
+  // Shuffle letters of the word
+  GS.sWord=w.word.toUpperCase();
+  GS.sLetters=shuf([...GS.sWord]).map((l,i)=>({l,origIdx:i,used:false}));
+  GS.sAns=[];
+  renderSpell();
+}
+function renderSpell(){
+  if(GS.idx>=GS.words.length) return;
+  const w=GS.words[GS.idx];
+  const {sLetters,sAns}=GS;
+  document.getElementById('abody').innerHTML=
+    pdots(GS.hist,GS.total,GS.idx)+
+    sbanner(`<div class="sp2"><div class="sp2-n">${GS.idx+1}/${GS.total}</div><div class="sp2-l">Soru</div></div>`)+
+    `<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:11px;">
+      <div style="font-size:9px;color:var(--gold);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;font-weight:600;">ANLAM</div>
+      <div style="font-size:13px;color:var(--text);line-height:1.6;">${esc(w.meaning||'')}</div>
+    </div>
+    <div class="spellans">
+      ${sAns.length?sAns.map((_,i)=>`<div class="spslot" data-ai="${i}">${esc(sAns[i].l)}</div>`).join(''):'<span style="font-size:10px;color:var(--muted)">Harfleri seç…</span>'}
+    </div>
+    <div class="splbts">
+      ${sLetters.map((x,idx)=>`<button class="splbt${x.used?' used':''}" data-li="${idx}">${esc(x.l)}</button>`).join('')}
+    </div>
+    <div class="brow">
+      <button class="btn bo" style="flex:1;margin:0" onclick="spClr()">🔄 Temizle</button>
+      <button class="btn bg" style="flex:1;margin:0" onclick="spChk()">✅ Kontrol</button>
+    </div>`;
+
+  // Slot click = remove
+  document.querySelectorAll('.spslot').forEach(el=>{
+    el.addEventListener('click',()=>spRm(parseInt(el.dataset.ai)));
+  });
+  // Letter button click = add
+  document.querySelectorAll('.splbt:not(.used)').forEach(el=>{
+    el.addEventListener('click',()=>spAdd(parseInt(el.dataset.li)));
+  });
+}
+function spAdd(i){
+  GS.sLetters[i].used=true;
+  GS.sAns.push({l:GS.sLetters[i].l,li:i});
+  renderSpell();
+}
+function spRm(ai){
+  const item=GS.sAns[ai];
+  if(item) GS.sLetters[item.li].used=false;
+  GS.sAns.splice(ai,1);
+  renderSpell();
+}
+function spClr(){
+  GS.sLetters.forEach(x=>x.used=false);
+  GS.sAns=[];
+  renderSpell();
+}
+function spChk(){
+  const ans=GS.sAns.map(a=>a.l).join('');
+  if(!ans){ toast('⚠️ Önce harfleri seç!'); return; }
+  const correct=GS.sWord;
+  const ok=ans===correct;
+  const w=V.find(v=>v.id===GS.words[GS.idx].id);
+  if(ok){
+    if(w) w.correct=(w.correct||0)+1;
+    GS.score+=150; GS.correct++;
+    toast('✅ Doğru! +150');
+  } else {
+    toast(`❌ Doğrusu: ${correct}`);
+    GS.wrong++;
+  }
+  GS.hist.push(ok);
+  save(); updSc();
+  setTimeout(()=>{ GS.idx++; nextSpell(); },1500);
+}
+
+/* ══════════════════════════════════════════
+   DETAIL MODALS
+══════════════════════════════════════════ */
+function openDet(id){
+  const b=B.find(x=>x.id===id); if(!b) return;
+  const bj=J.filter(e=>e.bookId===id).sort((a,c)=>c.date.localeCompare(a.date));
+  const bv=V.filter(v=>v.bookId===id);
+  const pct=b.totalPages?Math.round((b.currentPage||0)/b.totalPages*100):0;
+  document.getElementById('det-body').innerHTML=`
+    <div style="display:flex;gap:11px;align-items:center;margin-bottom:14px;">
+      <div class="bcov" style="width:50px;height:66px;font-size:22px;">${b.emoji||'📕'}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-family:'Playfair Display',serif;font-size:15px;color:var(--cream);">${esc(b.title)}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;">${esc(b.author||'')}</div>
+        ${b.genre?`<div style="font-size:10px;color:var(--gold);margin-top:2px;">${esc(b.genre)}</div>`:''}
+      </div>
+    </div>
+    ${b.rating?`<div style="margin-bottom:11px;">${'⭐'.repeat(b.rating)} <span style="font-size:10px;color:var(--muted);">(${b.rating}/5)</span></div>`:''}
+    ${b.totalPages?`<div style="margin-bottom:11px;">
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:3px;"><span>İlerleme</span><span>${b.currentPage||0}/${b.totalPages} · %${pct}</span></div>
+      <div class="pbar" style="height:5px"><div class="pfill" style="width:${pct}%"></div></div>
+    </div>`:''}
+    ${bv.length?`<div style="background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:11px;">
+      <div style="font-size:9px;color:var(--pul);text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px;font-weight:600;">🔤 ${bv.length} Kelime</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;">${bv.map(w=>`<span class="tag" style="cursor:pointer" onclick="closeOv('ov-det');setTimeout(()=>openWDet('${w.id}'),200)">${esc(w.word)}</span>`).join('')}</div>
+    </div>`:''}
+    <div class="brow mb8">
+      <button class="btn bg" style="flex:1;margin:0" onclick="closeOv('ov-det');setTimeout(()=>editBook('${id}'),200)">✏️ Düzenle</button>
+      <button class="btn bred" style="flex:.45;margin:0" onclick="delBook('${id}')">🗑️</button>
+    </div>
+    ${bj.length?`<div style="font-family:'Playfair Display',serif;font-size:13px;color:var(--cream);margin-bottom:7px;margin-top:4px;">Günlük Girişleri</div>
+    ${bj.map(e=>`<div class="jcard" style="position:relative;cursor:pointer;" onclick="closeOv('ov-det');setTimeout(()=>openJReader('${e.id}'),200)">
+      <div class="jbook">${new Date(e.date+'T12:00:00').toLocaleDateString('tr-TR',{day:'numeric',month:'long'})}</div>
+      <div class="jtext">${esc(e.summary)}</div>
+      <div class="jfoot">${e.pagesFrom&&e.pagesTo?`<span>📄 ${e.pagesFrom}–${e.pagesTo}</span>`:''} ${e.rating?`<span>${'⭐'.repeat(e.rating)}</span>`:''}</div>
+    </div>`).join('')}`:'<p style="font-size:11px;color:var(--muted);text-align:center;padding:10px 0;">Günlük girişi yok</p>'}`;
+  openOv('ov-det');
+}
+
+function openWDet(id){
+  const w=V.find(v=>v.id===id); if(!w) return;
+  const bk=B.find(b=>b.id===w.bookId);
+  const dots=[1,2,3,4,5].map(i=>`<div class="md${(w.correct||0)>=i?' on':''}"></div>`).join('');
+  const m=mastery(w);
+  const ml=m==='mastered'?'✅ Öğrenildi':m==='learning'?'📈 Öğreniliyor':'🆕 Yeni';
+  document.getElementById('wdet-body').innerHTML=`
+    <div style="text-align:center;margin-bottom:15px;">
+      <div style="font-family:'Playfair Display',serif;font-size:28px;color:var(--gl2);margin-bottom:7px;">${esc(w.word)}</div>
+      <div style="display:inline-flex;gap:3px;">${dots}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px;">${(w.correct||0)}/5 doğru · ${ml}</div>
+    </div>
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:11px;padding:12px;margin-bottom:9px;">
+      <div style="font-size:9px;color:var(--gold);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;font-weight:600;">ANLAM</div>
+      <div style="font-size:14px;color:var(--text);line-height:1.7;">${esc(w.meaning||'')}</div>
+    </div>
+    ${w.example?`<div style="background:var(--card2);border:1px solid var(--border);border-radius:11px;padding:12px;margin-bottom:9px;">
+      <div style="font-size:9px;color:var(--pul);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;font-weight:600;">ÖRNEK CÜMLE</div>
+      <div style="font-size:13px;color:var(--text);line-height:1.7;font-style:italic;">"${esc(w.example)}"</div>
+    </div>`:''}
+    ${bk?`<div style="font-size:11px;color:var(--muted);margin-bottom:9px;">📖 ${esc(bk.title)}'den alındı</div>`:''}
+    <div class="brow mb8">
+      <button class="btn bg" style="flex:1;margin:0" onclick="closeOv('ov-wdet');setTimeout(()=>editWord('${id}'),200)">✏️ Düzenle</button>
+      <button class="btn bred" style="flex:.45;margin:0" onclick="delWord('${id}')">🗑️</button>
+    </div>
+    <button class="btn bo" onclick="closeOv('ov-wdet');setTimeout(()=>startGame('fc'),200)">🃏 Flashcard Antrenmanı</button>`;
+  openOv('ov-wdet');
+}
+
+/* ══════════════════════════════════════════
+   OVERLAY HELPERS
+══════════════════════════════════════════ */
+function openOv(id){ const el=document.getElementById(id); if(el) el.classList.add('on'); }
+function closeOv(id){ const el=document.getElementById(id); if(el) el.classList.remove('on'); }
+
+// Close overlay on background tap (not for fullscreen journal reader)
+document.querySelectorAll('.ov').forEach(o=>{
+  if(o.id!=='ov-jr'){
+    o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('on'); });
+  }
+});
+
+/* ══════════════════════════════════════════
+   FAB
+══════════════════════════════════════════ */
+function fabAct(){
+  const minForFab={home:0,journal:0,vocab:0,games:2};
+  if(curScr==='games'){
+    if(V.length>=2) startGame('fc');
+    else toast('⚠️ En az 2 kelime ekle!');
+    return;
+  }
+  const map={home:openBookModal,journal:openJournalModal,vocab:openWordModal};
+  map[curScr]?.();
+}
+
+/* ══════════════════════════════════════════
+   BOOK FORM
+══════════════════════════════════════════ */
+function openBookModal(editId=null){
+  editBId=editId;
+  document.getElementById('bm-h').textContent=editId?'Kitabı Düzenle':'Kitap Ekle';
+  const b=editId?B.find(x=>x.id===editId):null;
+  document.getElementById('b-tit').value=b?.title||'';
+  document.getElementById('b-aut').value=b?.author||'';
+  document.getElementById('b-gen').value=b?.genre||'';
+  document.getElementById('b-pg').value=b?.totalPages||'';
+  document.getElementById('b-cpg').value=b?.currentPage||'';
+  document.getElementById('b-st').value=b?.status||'reading';
+  selEmoji=b?.emoji||'📕'; selStar=b?.rating||0;
+  document.querySelectorAll('.emopt').forEach(el=>el.classList.toggle('on',el.textContent.trim()===selEmoji));
+  updStars('b-stars',selStar);
+  onBStatus();
+  openOv('ov-book');
+}
+function onBStatus(){
+  const st=document.getElementById('b-st').value;
+  document.getElementById('b-rat-g').style.display=st==='done'?'block':'none';
+  document.getElementById('b-cpg-g').style.display=st==='reading'?'block':'none';
+}
+function saveBook(){
+  const title=(document.getElementById('b-tit').value||'').trim();
+  if(!title){ toast('⚠️ Kitap adı gerekli!'); return; }
+  const status=document.getElementById('b-st').value;
+  const tp=parseInt(document.getElementById('b-pg').value)||0;
+  const cp=parseInt(document.getElementById('b-cpg').value)||0;
+  const data={
+    title,
+    author:(document.getElementById('b-aut').value||'').trim(),
+    genre:(document.getElementById('b-gen').value||'').trim(),
+    totalPages:tp,status,emoji:selEmoji,rating:selStar||0,
+    currentPage:status==='done'?tp:cp
+  };
+  if(editBId){
+    const i=B.findIndex(b=>b.id===editBId);
+    if(i>-1) Object.assign(B[i],data);
+    toast('✅ Güncellendi');
+  } else {
+    B.push({id:uid(),...data,addedAt:new Date().toISOString()});
+    toast('📚 Kitap eklendi!');
+  }
+  save(); renderAll(); closeOv('ov-book');
+}
+function editBook(id){ openBookModal(id); }
+function delBook(id){
+  if(!confirm('Bu kitabı ve tüm günlük girişlerini sil?')) return;
+  B=B.filter(b=>b.id!==id);
+  J=J.filter(e=>e.bookId!==id);
+  V.forEach(v=>{ if(v.bookId===id) v.bookId=null; }); // Detach words instead of deleting
+  save(); renderAll(); closeOv('ov-det');
+  toast('🗑️ Kitap silindi');
+}
+
+/* ══════════════════════════════════════════
+   JOURNAL FORM
+══════════════════════════════════════════ */
+function openJournalModal(editId=null){
+  editJId=editId;
+  document.getElementById('jm-h').textContent=editId?'Günlüğü Düzenle':'Okuma Günlüğü';
+  document.getElementById('j-eid').value=editId||'';
+  const e=editId?J.find(x=>x.id===editId):null;
+  const sel=document.getElementById('j-book');
+  sel.innerHTML='<option value="">-- Kitap Seç --</option>';
+  // Show ALL books in edit mode; only non-plan books in add mode
+  const books=editId?B:B.filter(b=>b.status!=='plan');
+  books.forEach(b=>{
+    const o=new Option((b.emoji||'📕')+' '+b.title, b.id);
+    if(e?.bookId===b.id) o.selected=true;
+    sel.add(o);
+  });
+  document.getElementById('j-sum').value=e?.summary||'';
+  document.getElementById('j-from').value=e?.pagesFrom||'';
+  document.getElementById('j-to').value=e?.pagesTo||'';
+  selJStar=e?.rating||0; updStars('j-stars',selJStar);
+  openOv('ov-journal');
+}
+function saveJournal(){
+  const bookId=document.getElementById('j-book').value;
+  const summary=(document.getElementById('j-sum').value||'').trim();
+  if(!bookId||!summary){ toast('⚠️ Kitap ve özet gerekli!'); return; }
+  const pf=parseInt(document.getElementById('j-from').value)||0;
+  const pt=parseInt(document.getElementById('j-to').value)||0;
+  if(pf>0&&pt>0&&pf>pt){ toast('⚠️ Başlangıç sayfası bitiş sayfasından büyük olamaz!'); return; }
+  const eid=document.getElementById('j-eid').value;
+  if(eid){
+    const i=J.findIndex(x=>x.id===eid);
+    if(i>-1){
+      J[i]={...J[i],bookId,summary,pagesFrom:pf,pagesTo:pt,rating:selJStar};
+    }
+    toast('✅ Günlük güncellendi');
+  } else {
+    J.push({id:uid(),bookId,date:new Date().toISOString().slice(0,10),summary,pagesFrom:pf,pagesTo:pt,rating:selJStar});
+    // Update book progress
+    if(pt>0){
+      const b=B.find(x=>x.id===bookId);
+      if(b&&pt>(b.currentPage||0)) b.currentPage=pt;
+      if(b&&b.totalPages&&b.currentPage>=b.totalPages) b.status='done';
+    }
+    toast('📝 Günlük kaydedildi!');
+  }
+  save(); renderAll(); closeOv('ov-journal');
+}
+
+/* ══════════════════════════════════════════
+   WORD FORM
+══════════════════════════════════════════ */
+function openWordModal(editId=null){
+  editWId=editId;
+  document.getElementById('wm-h').textContent=editId?'Kelimeyi Düzenle':'Kelime Ekle';
+  const w=editId?V.find(v=>v.id===editId):null;
+  document.getElementById('w-word').value=w?.word||'';
+  document.getElementById('w-mean').value=w?.meaning||'';
+  document.getElementById('w-ex').value=w?.example||'';
+  const sel=document.getElementById('w-book');
+  sel.innerHTML='<option value="">-- Kitap Seç --</option>';
+  B.forEach(b=>{
+    const o=new Option((b.emoji||'📕')+' '+b.title,b.id);
+    if(w?.bookId===b.id) o.selected=true;
+    sel.add(o);
+  });
+  openOv('ov-word');
+}
+function saveWord(){
+  const word=(document.getElementById('w-word').value||'').trim();
+  const meaning=(document.getElementById('w-mean').value||'').trim();
+  if(!word||!meaning){ toast('⚠️ Kelime ve anlam gerekli!'); return; }
+  if(!editWId&&V.find(v=>v.word.toLowerCase()===word.toLowerCase())){
+    toast('⚠️ Bu kelime zaten listede!'); return;
+  }
+  if(editWId){
+    const i=V.findIndex(v=>v.id===editWId);
+    if(i>-1){
+      V[i].word=word;
+      V[i].meaning=meaning;
+      V[i].example=(document.getElementById('w-ex').value||'').trim();
+      V[i].bookId=document.getElementById('w-book').value||null;
+    }
+    toast('✅ Kelime güncellendi');
+  } else {
+    V.push({
+      id:uid(),word,meaning,
+      example:(document.getElementById('w-ex').value||'').trim(),
+      bookId:document.getElementById('w-book').value||null,
+      addedAt:new Date().toISOString(),seen:0,correct:0
+    });
+    toast('✅ Kelime eklendi!');
+  }
+  save(); renderAll(); closeOv('ov-word');
+}
+function editWord(id){ openWordModal(id); }
+function delWord(id){
+  if(!confirm('Bu kelimeyi sil?')) return;
+  V=V.filter(v=>v.id!==id);
+  save(); renderAll(); closeOv('ov-wdet');
+  toast('🗑️ Kelime silindi');
+}
+
+/* ══════════════════════════════════════════
+   FORM HELPERS
+══════════════════════════════════════════ */
+function pEmoji(el,emoji){
+  document.querySelectorAll('.emopt').forEach(e=>e.classList.remove('on'));
+  el.classList.add('on'); selEmoji=emoji;
+}
+function pStar(n){ selStar=n; updStars('b-stars',n); }
+function pJStar(n){ selJStar=n; updStars('j-stars',n); }
+function updStars(cid,n){
+  document.querySelectorAll(`#${cid} .star`).forEach((s,i)=>s.classList.toggle('on',i<n));
+}
+
+/* ══════════════════════════════════════════
+   NAVIGATION
+══════════════════════════════════════════ */
+function goScreen(name,btn){
+  curScr=name;
+  document.querySelectorAll('.sc').forEach(s=>s.classList.remove('on'));
+  const sc=document.getElementById('sc-'+name);
+  if(sc) sc.classList.add('on');
+  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('on'));
+  if(btn) btn.classList.add('on');
+  const ab=document.querySelector('.app-body');
+  if(ab) ab.scrollTop=0;
+  const fab=document.getElementById('fab');
+  if(fab) fab.style.display=name==='settings'?'none':'flex';
+  if(name==='games') renderGames();
+  if(name==='vocab'){ loadWOTD(); renderVocab(); }
+  if(name==='settings') updateApiKeyStatus();
+}
+
+/* ══════════════════════════════════════════
+   EXCEL IMPORT / EXPORT
+══════════════════════════════════════════ */
+function exportCSV(){
+  if(!V.length){ toast('⚠️ Kelime listesi boş!'); return; }
+  const rows=[['kelime','anlam','ornek','kitap','dogru','goruldu','eklenme']];
+  V.forEach(w=>{
+    const bk=B.find(b=>b.id===w.bookId);
+    rows.push([
+      w.word, w.meaning, w.example||'',
+      bk?bk.title:'', w.correct||0, w.seen||0, w.addedAt||''
+    ]);
+  });
+  // RFC 4180 CSV with BOM for Excel Turkish char support
+  const csv=rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\r\n');
+  const bom='\uFEFF';
+  const blob=new Blob([bom+csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download='kelimeler-'+new Date().toISOString().slice(0,10)+'.csv';
+  a.click(); URL.revokeObjectURL(url);
+  toast('📊 CSV indirildi ('+V.length+' kelime)');
+}
+
+function importExcel(event){
+  const file=event.target.files[0]; if(!file) return;
+  const ext=file.name.split('.').pop().toLowerCase();
+  const prog=document.getElementById('excel-progress');
+  const progTxt=document.getElementById('excel-prog-txt');
+  const progFill=document.getElementById('excel-prog-fill');
+  prog.style.display='block';
+  progFill.style.width='10%';
+  progTxt.textContent='Dosya okunuyor…';
+
+  if(ext==='csv'){
+    const reader=new FileReader();
+    reader.onload=e=>{ processCSV(e.target.result,prog,progTxt,progFill); };
+    reader.onerror=()=>{ toast('❌ Dosya okunamadı'); prog.style.display='none'; };
+    reader.readAsText(file,'UTF-8');
+  } else if(ext==='xlsx'||ext==='xls'){
+    if(!window.XLSX){
+      progTxt.textContent='SheetJS kütüphanesi yükleniyor…';
+      const s=document.createElement('script');
+      s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      s.onload=()=>{ readXLSX(file,prog,progTxt,progFill); };
+      s.onerror=()=>{ toast('❌ Kütüphane yüklenemedi. İnternet bağlantınızı kontrol edin.'); prog.style.display='none'; };
+      document.head.appendChild(s);
+    } else {
+      readXLSX(file,prog,progTxt,progFill);
+    }
+  } else {
+    toast('❌ Desteklenmeyen format. (.xlsx veya .csv yükle)');
+    prog.style.display='none';
+  }
+  event.target.value='';
+}
+
+function readXLSX(file,prog,progTxt,progFill){
+  progTxt.textContent='Excel dosyası okunuyor…';
+  progFill.style.width='30%';
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const wb=window.XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=window.XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+      processRows(rows,prog,progTxt,progFill);
+    }catch(err){
+      toast('❌ Excel okunamadı: '+err.message);
+      prog.style.display='none';
+    }
+  };
+  reader.onerror=()=>{ toast('❌ Dosya okunamadı'); prog.style.display='none'; };
+  reader.readAsArrayBuffer(file);
+}
+
+function processCSV(text,prog,progTxt,progFill){
+  progFill.style.width='30%';
+  const lines=text.trim().split(/\r?\n/); // Handle both \r\n and \n
+  const rows=lines.map(line=>{
+    const cells=[]; let cur='', inQ=false;
+    for(let ci=0;ci<line.length;ci++){
+      const ch=line[ci];
+      if(ch==='"'){
+        if(inQ&&line[ci+1]==='"'){ cur+='"'; ci++; } // escaped quote
+        else inQ=!inQ;
+      } else if(ch===','&&!inQ){ cells.push(cur.trim()); cur=''; }
+      else cur+=ch;
+    }
+    cells.push(cur.trim()); return cells;
+  });
+  processRows(rows,prog,progTxt,progFill);
+}
+
+function processRows(rows,prog,progTxt,progFill){
+  if(rows.length<2){ toast('⚠️ Dosya boş veya geçersiz'); prog.style.display='none'; return; }
+  const hdr=rows[0].map(h=>String(h||'').toLowerCase().trim());
+  const cols={word:-1,mean:-1,ex:-1,book:-1};
+  hdr.forEach((h,i)=>{
+    if(['kelime','word','sözcük','term'].includes(h)) cols.word=i;
+    else if(['anlam','anlami','meaning','mean','definition'].includes(h)) cols.mean=i;
+    else if(['örnek','ornek','example','ex','cümle','cumle'].includes(h)) cols.ex=i;
+    else if(['kitap','book','kaynak','source'].includes(h)) cols.book=i;
+  });
+  if(cols.word===-1) cols.word=0;
+  if(cols.mean===-1) cols.mean=1;
+  if(cols.ex===-1&&hdr.length>2) cols.ex=2;
+  if(cols.book===-1&&hdr.length>3) cols.book=3;
+
+  const dataRows=rows.slice(1).filter(r=>r[cols.word]&&String(r[cols.word]).trim());
+  if(!dataRows.length){ toast('⚠️ Geçerli kelime satırı bulunamadı'); prog.style.display='none'; return; }
+
+  let added=0, skipped=0;
+  dataRows.forEach((r,idx)=>{
+    progFill.style.width=(30+Math.round(idx/dataRows.length*60))+'%';
+    const word=String(r[cols.word]||'').trim();
+    const meaning=String(cols.mean>=0&&r[cols.mean]!=null?r[cols.mean]:'').trim();
+    if(!word||!meaning){ skipped++; return; }
+    if(V.find(v=>v.word.toLowerCase()===word.toLowerCase())){ skipped++; return; }
+    const ex=cols.ex>=0&&r[cols.ex]!=null?String(r[cols.ex]).trim():'';
+    const bookName=cols.book>=0&&r[cols.book]!=null?String(r[cols.book]).trim():'';
+    const bk=bookName?B.find(b=>b.title.toLowerCase().includes(bookName.toLowerCase())):null;
+    V.push({id:uid(),word,meaning,example:ex,bookId:bk?.id||null,addedAt:new Date().toISOString(),seen:0,correct:0});
+    added++;
+  });
+
+  progFill.style.width='100%';
+  progTxt.textContent=`✅ ${added} kelime eklendi, ${skipped} atlandı`;
+  save(); renderAll();
+  setTimeout(()=>{ prog.style.display='none'; },3000);
+  toast(`📊 ${added} kelime aktarıldı!`);
+}
+
+/* ══════════════════════════════════════════
+   JSON EXPORT / IMPORT / CLEAR
+══════════════════════════════════════════ */
+function exportJSON(){
+  const data=JSON.stringify({books:B,journal:J,vocab:V,scores:SC,xp:XP,exportDate:new Date().toISOString()},null,2);
+  const blob=new Blob([data],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download='kutuphanem-yedek-'+new Date().toISOString().slice(0,10)+'.json';
+  a.click(); URL.revokeObjectURL(url);
+  toast('📤 JSON yedeği indirildi');
+}
+function importJSON(event){
+  const file=event.target.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const d=JSON.parse(e.target.result);
+      if(!confirm('Mevcut tüm veriler silinip yedeğe dönülecek. Emin misin?')) return;
+      if(Array.isArray(d.books)) B=d.books;
+      if(Array.isArray(d.journal)) J=d.journal;
+      if(Array.isArray(d.vocab)) V=d.vocab;
+      if(Array.isArray(d.scores)) SC=d.scores;
+      if(typeof d.xp==='number'&&!isNaN(d.xp)) XP=d.xp;
+      save(); renderAll();
+      toast('📥 Yedek başarıyla yüklendi!');
+    }catch(err){ toast('❌ Geçersiz JSON dosyası!'); }
+  };
+  reader.onerror=()=>{ toast('❌ Dosya okunamadı'); };
+  reader.readAsText(file);
+  event.target.value='';
+}
+function clearAll(){
+  if(!confirm('TÜM veriler kalıcı olarak silinecek!')) return;
+  if(!confirm('Son kez: Bu işlem geri alınamaz! Devam et?')) return;
+  B=[]; J=[]; V=[]; SC=[]; XP=0;
+  save(); renderAll();
+  toast('🗑️ Tüm veriler silindi');
+}
+
+/* ══════════════════════════════════════════
+   BOOT
+══════════════════════════════════════════ */
+document.addEventListener('DOMContentLoaded',()=>{
+  applyTheme();
+  updateApiKeyStatus();
+  renderAll();
+  loadWOTD();
+});
+</script>
+</body>
+</html>
