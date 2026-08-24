@@ -67,6 +67,14 @@ def clean_text(value) -> str:
     return _WS_RE.sub(" ", str(value)).strip()
 
 
+def turkce_buyut(s: str) -> str:
+    """Türkçe-uyumlu BÜYÜK HARF: 'i'→'İ', 'ı'→'I' korunur.
+    (Python'un varsayılan .upper() metodu 'i'yi yanlışça 'I' yapar.)"""
+    if not s:
+        return s
+    return s.replace("i", "İ").replace("ı", "I").upper()
+
+
 def fmt_qty(val) -> str:
     """Miktarı okunaklı yazar: tamsa '13', ondalıksa nokta ile '1987.03'."""
     try:
@@ -434,7 +442,7 @@ def parse_header(root, inv_cur="TRY", rate=1.0):
 
     supplier = _first(root, "AccountingSupplierParty")
     party = _first(supplier, "Party") if supplier is not None else None
-    firma_unvani = _extract_unvan(party)
+    firma_unvani = turkce_buyut(_extract_unvan(party))   # ünvanlar BÜYÜK HARF
     vkn_tckn = _extract_vkn(party)
 
     # Matrah = KDV hariç toplam (LegalMonetaryTotal/TaxExclusiveAmount)
@@ -772,7 +780,7 @@ def _ai_recover_row(content, display, api_key, mod):
         base = {
             "Fatura Tarihi":         data.get("fatura_tarihi") or "",
             "Fatura Numarası":       data.get("fatura_no") or "",
-            "Firma Ünvanı":          data.get("firma_unvani") or "",
+            "Firma Ünvanı":          turkce_buyut(data.get("firma_unvani") or ""),
             "Vergi Kimlik Numarası": data.get("vkn_tckn") or "",
             "Malın Cinsi":           data.get("mal_cinsi") or "(Kurtarıldı)",
             "Miktar":                "",
@@ -907,7 +915,7 @@ def post_process_ai(all_data, ai_features, api_key, mod, log_fn):
             fmap = ai_normalize_firmalar(firmalar, api_key)
             for row in all_data:
                 o = row.get("Firma Ünvanı", "")
-                row["Firma Ünvanı"] = fmap.get(o, o)
+                row["Firma Ünvanı"] = turkce_buyut(fmap.get(o, o))
             log_fn(f"   ✓ {len(firmalar)} firma kontrol edildi")
         except Exception as e:
             log_fn(f"   ⚠ Firma normalizasyonu hatası: {e}")
