@@ -36,6 +36,7 @@ AI Özellikleri (opsiyonel — VARSAYILAN KAPALI, Anthropic API Key gerekir)
 import os
 import re
 import json
+import datetime
 import threading
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -84,6 +85,37 @@ def fmt_qty(val) -> str:
     if f == int(f):
         return str(int(f))
     return f"{f:.4f}".rstrip("0").rstrip(".")
+
+
+def parse_date(value):
+    """ISO/GİB tarih metnini gerçek tarihe çevirir (Excel'de dd/mm/yyyy görünür).
+    Çözülemezse metni olduğu gibi döndürür."""
+    s = clean_text(value)
+    if not s:
+        return ""
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%Y/%m/%d", "%d-%m-%Y"):
+        try:
+            return datetime.datetime.strptime(s[:10], fmt).date()
+        except ValueError:
+            continue
+    return s
+
+
+def normalize_donem(value):
+    """'2026/02', '2026-02', '202602' → 202602 (int). Boşsa None."""
+    if value is None:
+        return None
+    nums = re.findall(r"\d+", str(value))
+    if not nums:
+        return None
+    if len(nums) == 1 and len(nums[0]) == 6:
+        return int(nums[0])
+    if len(nums) >= 2:
+        yil, ay = nums[0], nums[1].zfill(2)
+        if len(yil) == 4 and 1 <= int(ay) <= 12:
+            return int(f"{yil}{ay}")
+    d = re.sub(r"\D", "", str(value))
+    return int(d) if d else None
 
 
 def try_decode(data):
@@ -1042,6 +1074,149 @@ TEXT_COLS = {"Fatura Tarihi", "Fatura Numarası", "Vergi Kimlik Numarası"}
 HEADER_FILL = "FF1F4E79"
 
 
+# ── Resmî "İndirilecek KDV Listesi" (16 sütun) başlıkları ──
+IKL_BASLIKLAR = [
+    "Sıra No",
+    "Alış Faturasının Tarihi",
+    "Alış Faturasının Serisi",
+    "Alış Faturasının Sıra No'su",
+    "Satıcının Adı-Soyadı / Ünvanı",
+    "Satıcının Vergi Kimlik Numarası / TC Kimlik Numarası",
+    "Alınan Mal ve/veya Hizmetin Cinsi",
+    "Alınan Mal ve/veya Hizmetin Miktarı",
+    "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı",
+    "KDV'si",
+    "Tevkifata Tabi Olmayan Ve Bu Dönemde İndirilen Kdv Tutarı",
+    "2 Nolu Beyannamede Ödenen Kdv Tutarı",
+    "Toplam İndirilecek KDV Tutarı",
+    "GGB Tescil No'su (Alış İthalat İse)",
+    "Belgenin İndirim Hakkının Kullanıldığı KDV Dönemi",
+]
+# Sütun genişlikleri (resmî şablondan) — B..P
+IKL_GENISLIK = [4.4, 11.6, 11.6, 17.4, 59.0, 13.0, 42.3, 26.7,
+                14.6, 13.9, 13.9, 13.6, 13.3, 10.3, 9.1]
+
+
+def kaydet_indirilecek_kdv(rows, save_path, donem=None):
+    """Resmî 'İndirilecek KDV Listesi' formatında Excel üretir (16 sütun).
+
+    Sütun eşlemesi:
+      Matrah  → J (KDV Hariç Tutar)
+      KDV     → K (KDV'si)   ve   N (Toplam İndirilecek)
+      Tevkifat→ M (2 Nolu Beyannamede Ödenen)
+      L (Tevkifata tabi olmayan indirilen) = K - M   (yalnızca tevkifat varsa)
+      P (KDV Dönemi) = kullanıcının girdiği dönem (örn. 202602)
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "İNDİRİLECEK LİSTESİ"
+
+    thin = Side(style="thin", color="B0B0B0")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    hdr_fill = PatternFill("solid", fgColor="FF1F4E79")
+    hdr_font = Font(bold=True, color="FFFFFF", size=9)
+    money_fmt = "#,##0.00"
+
+    # Sütun genişlikleri (A boş dar sütun + B..P)
+    ws.column_dimensions["A"].width = 1.6
+    for i, w in enumerate(IKL_GENISLIK):
+        ws.column_dimensions[get_column_letter(2 + i)].width = w
+
+    # Başlık (Row 1) — B1:P1 birleşik, ortalı
+    ws.merge_cells("B1:P1")
+    t = ws["B1"]
+    t.value = "İNDİRİLECEK KDV LİSTESİ"
+    t.font = Font(bold=True, size=14, color="1F4E79")
+    t.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 26
+
+    # Başlık satırı (Row 3)
+    HDR_ROW = 3
+    for i, bas in enumerate(IKL_BASLIKLAR):
+        c = ws.cell(HDR_ROW, 2 + i, bas)
+        c.font = hdr_font
+        c.fill = hdr_fill
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = border
+    ws.row_dimensions[HDR_ROW].height = 54
+
+    # Veri satırları
+    r = HDR_ROW + 1
+    tG = {9: 0.0, 10: 0.0, 11: 0.0, 12: 0.0, 13: 0.0}  # J,K,L,M,N toplamları
+    for idx, row in enumerate(rows, start=1):
+        matrah = float(row.get("Fatura Matrahı") or 0)
+        kdv = float(row.get("Fatura KDV Tutarı") or 0)
+        tevk = float(row.get("Tevkifat Tutarı") or 0)
+        l_val = round(kdv - tevk, 2) if tevk > 0 else None    # tevkifat yoksa boş
+        m_val = round(tevk, 2) if tevk > 0 else None
+        n_val = round(kdv, 2)
+
+        vals = [
+            idx,                                   # B Sıra No
+            parse_date(row.get("Fatura Tarihi")),  # C Tarih (gerçek tarih)
+            "",                                    # D Seri (e-faturada yok)
+            str(row.get("Fatura Numarası") or ""), # E Fatura No
+            row.get("Firma Ünvanı") or "",         # F Ünvan
+            str(row.get("Vergi Kimlik Numarası") or ""),  # G VKN
+            row.get("Malın Cinsi") or "",          # H Cins
+            row.get("Miktar") or "",               # I Miktar
+            round(matrah, 2),                      # J KDV Hariç Tutar
+            round(kdv, 2),                         # K KDV'si
+            l_val,                                 # L Tevkifata tabi olmayan indirilen
+            m_val,                                 # M 2 Nolu beyanname
+            n_val,                                 # N Toplam indirilecek
+            "",                                    # O GGB
+            donem if donem is not None else "",    # P Dönem
+        ]
+        for i, v in enumerate(vals):
+            col = 2 + i
+            c = ws.cell(r, col, v)
+            c.border = border
+            if col == 3:                                   # Tarih
+                c.number_format = "dd/mm/yyyy;@"
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            elif col in (5, 7):                            # Fatura No, VKN → metin
+                c.number_format = "@"
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            elif col in (9, 10, 11, 12, 13):               # para sütunları
+                c.number_format = money_fmt
+                c.alignment = Alignment(horizontal="right", vertical="center")
+            elif col == 16:                                # Dönem
+                c.number_format = "0"
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            elif col == 2:                                 # Sıra No
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            else:                                          # Ünvan, Cins, Miktar
+                c.alignment = Alignment(vertical="center", wrap_text=True)
+        for k in tG:
+            v = vals[k - 1]
+            if isinstance(v, (int, float)):
+                tG[k] += v
+        r += 1
+
+    # Toplam satırı
+    lbl = ws.cell(r, 9, "TOPLAM")     # I sütunu
+    lbl.font = Font(bold=True)
+    lbl.alignment = Alignment(horizontal="right", vertical="center")
+    lbl.border = border
+    for k in (9, 10, 11, 12, 13):
+        c = ws.cell(r, k + 1, round(tG[k], 2))
+        c.font = Font(bold=True)
+        c.number_format = money_fmt
+        c.alignment = Alignment(horizontal="right", vertical="center")
+        c.border = border
+    for col in (2, 3, 4, 5, 6, 7, 8, 15, 16):
+        ws.cell(r, col).border = border
+
+    ws.freeze_panes = "B4"
+    wb.save(save_path)
+    return len(rows), 1, ["İNDİRİLECEK LİSTESİ"]
+
+
 def kaydet_excel(df, save_path, mod):
     from openpyxl.styles import Font, Alignment, PatternFill
     from openpyxl.utils import get_column_letter
@@ -1182,7 +1357,7 @@ class App(tk.Tk if _GUI_AVAILABLE else object):
         bf = tk.Frame(self._ck, bg=CARD)
         bf.pack(fill="x")
         self._rb_tekli = self._radio_btn(
-            bf, "Tekli Mod", "Her fatura = 1 satır\nSistemin kabul ettiği 9 sütunluk format",
+            bf, "İndirilecek KDV Listesi", "Her fatura = 1 satır\nResmî 16 sütunlu KDV listesi (teslime hazır)",
             "tekli", ACC, CARD)
         self._rb_tekli.pack(side="left", fill="both", expand=True, padx=(0, 6))
         self._rb_det = self._radio_btn(
@@ -1193,7 +1368,20 @@ class App(tk.Tk if _GUI_AVAILABLE else object):
         # ── Cins Gruplama ──
         self._card_grp = tk.Frame(self._scroll_frame, bg=CARD, padx=20, pady=14)
         self._card_grp.pack(fill="x", padx=16, pady=(10, 0))
-        tk.Label(self._card_grp, text="Cins Gruplama  (Tekli Mod)",
+
+        # KDV Dönemi (resmî liste için)
+        tk.Label(self._card_grp, text="KDV Dönemi",
+                 font=("Segoe UI", 10, "bold"), bg=CARD, fg=FG).pack(anchor="w")
+        tk.Label(self._card_grp,
+                 text="Örn. 2026/02 — 'İndirim hakkının kullanıldığı dönem' sütununa yazılır",
+                 font=("Segoe UI", 8), bg=CARD, fg=MUTED).pack(anchor="w", pady=(0, 4))
+        self.donem_var = tk.StringVar()
+        tk.Entry(self._card_grp, textvariable=self.donem_var, font=("Consolas", 10),
+                 bg="#0f0f1a", fg=FG, insertbackground=FG, relief="flat",
+                 width=16).pack(anchor="w", pady=(0, 10))
+        tk.Frame(self._card_grp, bg="#3a3a50", height=1).pack(fill="x", pady=(0, 10))
+
+        tk.Label(self._card_grp, text="Cins Gruplama",
                  font=("Segoe UI", 10, "bold"), bg=CARD, fg=FG).pack(anchor="w")
         tk.Label(self._card_grp, text="Aynı ürünün farklı ebatları nasıl gösterilsin?",
                  font=("Segoe UI", 8), bg=CARD, fg=MUTED).pack(anchor="w", pady=(0, 6))
@@ -1442,8 +1630,12 @@ class App(tk.Tk if _GUI_AVAILABLE else object):
                     row.pop(k, None)
 
         try:
-            df = pd.DataFrame(all_data)
-            satir, sekme, liste = kaydet_excel(df, self._kayit, mod)
+            if mod == "tekli":
+                donem = normalize_donem(self.donem_var.get())
+                satir, sekme, liste = kaydet_indirilecek_kdv(all_data, self._kayit, donem)
+            else:
+                df = pd.DataFrame(all_data)
+                satir, sekme, liste = kaydet_excel(df, self._kayit, mod)
             self._log(f"\n💾 Excel kaydedildi → {self._kayit}")
             self._log(f"   {satir} satır  |  {sekme} sekme")
             self._done(True, ok, fail, rec, satir, anomali, liste)
