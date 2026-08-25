@@ -275,5 +275,172 @@ def test_dosyalari_isle_uctan_uca(tmp_path):
     assert any(n.startswith("VKN_LISTESI") for n in dosyalar)
     assert any(n.startswith("GECERSIZ_SATIRLAR") for n in dosyalar)
     assert any(n.startswith("OZET_RAPOR") for n in dosyalar)
+    # Kalıcı işlem günlüğü (.txt) yazılmış olmalı (denetim izi)
+    assert any(p.name.startswith("ISLEM_GUNLUGU") for p in cikis.glob("*.txt"))
     # İlerleme geri çağrısı en az bir kez çağrılmış ve sona ulaşmış olmalı
     assert ilerleme_kayit and ilerleme_kayit[-1] == (2, 2)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Eski GİB tipi (başlık alt satırda, adsız seri sütunu, kesme işaretli KDV'si)
+# ══════════════════════════════════════════════════════════════════════════
+def _eski_gib_yaz(yol):
+    """Eski GİB tipi: 2 başlık/altbilgi satırı, sonra gerçek başlık; seri sütunu
+    adsız (Unnamed), 'KDV'si' kesme işaretli."""
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["İNDİRİLECEK KDV LİSTESİ"])
+    ws.append(["Dönem: 01/2026"])
+    ws.append(["Alış Faturasının Tarihi", "", "Alış Faturasının Sıra No'su",
+               "Satıcının Adı-Soyadı / Ünvanı", "Satıcının Vergi Kimlik Numarası",
+               "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı", "KDV'si"])
+    ws.append(["2026-01-05", "", "F1", "FIRMA X", "1000000010", 500000, 90000])
+    ws.append(["2026-01-06", "", "F2", "FIRMA Y", "1000000011", 50000, 9000])
+    wb.save(yol)
+
+
+def test_eski_gib_okuma_ve_secim(tmp_path):
+    yol = tmp_path / "OCAK_2026.xlsx"
+    _eski_gib_yaz(yol)
+    df = exay.ana_listeyi_oku(str(yol))
+    # Başlık alt satırdan doğru bulunmalı; kritik sütunlar eşleşmeli
+    assert exay.sutun_bul(list(df.columns), ['vergi kimlik']) is not None
+    assert exay.kdv_sutunu_bul(list(df.columns)) == "KDV'si"
+    assert exay.sutun_bul(list(df.columns), ['kdv hariç tutarı']) is not None
+    secilen, _ = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
+    assert "1000000010" in secilen        # 500.000 ≥ 150.000 (tek fatura)
+    assert "1000000011" not in secilen     # 50.000 eşik altı
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  CSV girdi (Türkçe kodlama + noktalı virgül ayraç + muhasebe tipi)
+# ══════════════════════════════════════════════════════════════════════════
+def test_csv_muhasebe_okuma(tmp_path):
+    yol = tmp_path / "OCAK_2026.csv"
+    icerik = (
+        "Hesap Kodu;Tarih;Fatura No;Vergi Kimlik No;Açıklama;Borç;Matrah\n"
+        "191.01;2026-01-10;F1;0071419747;FIRMA A;36000,00;200000,00\n"
+        "191.01;2026-01-11;F2;1000000002;FIRMA B;9000,00;50000,00\n"
+    )
+    yol.write_text(icerik, encoding="cp1254")   # TR Windows kodlaması
+    df = exay.ana_listeyi_oku(str(yol))
+    # Muhasebe eşlemesi uygulanmış olmalı
+    assert exay.kdv_sutunu_bul(list(df.columns)) is not None
+    secilen, _ = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
+    # 8 haneli VKN önde sıfır tamamlanarak geçerli sayılmalı ve seçilmeli
+    assert "0071419747" in secilen
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Kriter doğrulama
+# ══════════════════════════════════════════════════════════════════════════
+@pytest.mark.parametrize("et,eto,y,ok", [
+    ("150000", "450000", "80", True),
+    ("0", "450000", "80", False),        # limit 0 olamaz
+    ("150000", "-1", "80", False),       # negatif limit
+    ("150000", "450000", "0", False),    # yüzde 0 olamaz
+    ("150000", "450000", "120", False),  # yüzde 100'den büyük olamaz
+    ("abc", "450000", "80", False),      # sayı değil
+    ("450000", "150000", "80", True),    # tek>toplam teknik olarak geçerli (engellenmez)
+])
+def test_kriter_dogrula(et, eto, y, ok):
+    assert exay.kriter_dogrula(et, eto, y)[0] is ok
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Doğruluk kontrolleri (uyarı üreticiler)
+# ══════════════════════════════════════════════════════════════════════════
+def test_kdv_tutarlilik_kotu_esleme_uyarir():
+    # KDV = matrah (oran %100) → şüpheli, uyarı beklenir
+    df = pd.DataFrame({
+        "Alış Faturasının KDV Hariç Tutarı": [1000, 2000],
+        "KDV si": [1000, 2000],
+    })
+    assert exay.kdv_tutarlilik_kontrol(df)          # boş değil (uyarı var)
+
+
+def test_kdv_tutarlilik_iyi_esleme_uyarmaz():
+    df = pd.DataFrame({
+        "Alış Faturasının KDV Hariç Tutarı": [1000, 2000],
+        "KDV si": [180, 360],                        # %18
+    })
+    assert exay.kdv_tutarlilik_kontrol(df) == []
+
+
+def test_mukerrer_fatura():
+    df = pd.DataFrame({
+        "Satıcının Vergi Kimlik Numarası": ["1000000001", "1000000001", "1000000002"],
+        "Alış Faturasının Sıra No'su": ["F1", "F1", "F2"],
+    })
+    m = exay.mukerrer_fatura_bul(df)
+    assert m == [("1000000001", "F1", 2)]
+
+
+def test_ay_yil_bicimleri():
+    from datetime import datetime as _dt
+    assert exay._ay_yil("2026-04-15") == "04.2026"    # ISO
+    assert exay._ay_yil("15.04.2026") == "04.2026"    # gün.ay.yıl
+    assert exay._ay_yil(_dt(2026, 4, 15)) == "04.2026"
+    assert exay._ay_yil("") is None
+
+
+def test_donem_disi_tarih():
+    df = pd.DataFrame({
+        "Alış Faturasının Tarihi": ["2026-04-01", "2026-04-02", "2026-05-15"],
+    })
+    toplam, disi = exay.donem_disi_tarih_kontrol(df, "04.2026")
+    assert toplam == 3 and disi == 1                  # yalnızca Mayıs dönem dışı
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Sürükle-bırak yolu ayıklama
+# ══════════════════════════════════════════════════════════════════════════
+def test_dnd_ayikla():
+    ayik = exay.KDVBolmeApp._dnd_ayikla
+    assert ayik("/tmp/a.xlsx") == ["/tmp/a.xlsx"]
+    assert ayik("{/tmp/bir iki.xlsx} /tmp/c.csv") == ["/tmp/bir iki.xlsx", "/tmp/c.csv"]
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  PDF çıktı (reportlab kuruluysa)
+# ══════════════════════════════════════════════════════════════════════════
+@pytest.mark.skipif(not exay.pdf_destekli(), reason="reportlab kurulu değil")
+def test_pdf_uretimi(tmp_path):
+    yol = tmp_path / "NISAN_2026.xlsx"
+    _yeni_gib_yaz(yol)
+    df = exay.ana_listeyi_oku(str(yol))
+    secilen, _ = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
+    grp = secilen["1000000001"][0]
+    pdf = tmp_path / "firma.pdf"
+    exay.firma_pdf_olustur(grp, str(pdf), list(df.columns),
+                           vkn="1000000001", unvan="ÇĞİÖŞÜ FİRMA", donem="04.2026")
+    assert pdf.exists() and pdf.read_bytes()[:5] == b"%PDF-"
+
+
+def test_dosyalari_isle_pdf_uret(tmp_path):
+    yol = tmp_path / "NISAN_2026.xlsx"
+    _yeni_gib_yaz(yol)
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        pdf_uret=True)
+    cikis = tmp_path / "Hazır Tutanaklar"
+    pdfler = list(cikis.glob("*.pdf"))
+    if exay.pdf_destekli():
+        assert len(pdfler) == 2                       # A ve B için PDF
+    else:
+        assert len(pdfler) == 0                       # reportlab yoksa sessizce atlanır
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Çıktı klasörü yönlendirme (cikis_kok)
+# ══════════════════════════════════════════════════════════════════════════
+def test_cikis_kok_yonlendirme(tmp_path):
+    kaynak = tmp_path / "kaynak"
+    kaynak.mkdir()
+    yol = kaynak / "NISAN_2026.xlsx"
+    _yeni_gib_yaz(yol)
+    hedef = tmp_path / "baska_yer"
+    hedef.mkdir()
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        cikis_kok=str(hedef))
+    # Çıktı kaynağın yanına DEĞİL, seçilen hedefe yazılmalı
+    assert (hedef / "Hazır Tutanaklar").is_dir()
+    assert not (kaynak / "Hazır Tutanaklar").exists()

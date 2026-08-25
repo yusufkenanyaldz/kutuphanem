@@ -1,5 +1,5 @@
 """
-e-YMM Karşıt İnceleme — KDV Fatura Listesi Bölme Programı v5.0
+e-YMM Karşıt İnceleme — KDV Fatura Listesi Bölme Programı v5.1
 Kapsam kriterleri:
   1) Tek fatura >= esik_tek  VEYA  toplam >= esik_toplam
   2) Seçilenler listenin %80'ini karşılamıyorsa kalan firmalar
@@ -37,6 +37,8 @@ except ImportError:
     subprocess.check_call([sys.executable,'-m','pip','install',
                            'pandas','openpyxl','xlrd','--quiet'])
     import pandas as pd, openpyxl
+
+SURUM = "5.1"   # GUI başlığında ve özet raporda gösterilir
 
 SABLON_SUTUNLAR = [
     "Faturanın Tarihi","Faturanın Serisi","Faturanın Numarası",
@@ -102,10 +104,35 @@ def seri_sutunu_bul(kolonlar, tarih_col, faturano_col=None):
     except: pass
     return None
 
+def _csv_okuyucu_hazirla(dosya):
+    """CSV/TXT dosyaları için kodlama ve sütun ayracını otomatik saptayıp,
+    read_excel ile aynı arayüzde (header/skiprows kabul eden) bir okuyucu
+    döndürür. Türkçe muhasebe çıktıları çoğunlukla ';' ayraçlı ve Windows
+    (cp1254) kodludur; UTF-8 ve virgül/tab de denenir. dtype=str ile VKN ve
+    fatura no'daki baştaki sıfırlar korunur (para_deger tutarları yine ayrıştırır)."""
+    enc = 'utf-8'
+    ornek = ''
+    for e in ('utf-8-sig', 'utf-8', 'cp1254', 'iso-8859-9'):
+        try:
+            with open(dosya, 'r', encoding=e) as f:
+                ornek = f.read(8192)
+            enc = e
+            break
+        except (UnicodeDecodeError, LookupError):
+            continue
+    sayac = {s: ornek.count(s) for s in (';', '\t', ',')}
+    sep = max(sayac, key=sayac.get) if any(sayac.values()) else ';'
+    return lambda **kw: pd.read_csv(dosya, sep=sep, encoding=enc,
+                                    dtype=str, **kw)
+
 def ana_listeyi_oku(dosya):
     ext = Path(dosya).suffix.lower()
-    engine = 'xlrd' if ext == '.xls' else 'openpyxl'
-    raw = pd.read_excel(dosya, engine=engine, header=None)
+    if ext in ('.csv', '.txt'):
+        okuyucu = _csv_okuyucu_hazirla(dosya)
+    else:
+        engine = 'xlrd' if ext == '.xls' else 'openpyxl'
+        okuyucu = lambda **kw: pd.read_excel(dosya, engine=engine, **kw)
+    raw = okuyucu(header=None)
 
     # Başlık satırını bul — birden fazla anahtar kelimeyle dene
     ANAHTAR = ['alış faturası', 'satıcının', 'vergi kimlik',
@@ -121,7 +148,7 @@ def ana_listeyi_oku(dosya):
         dolu = raw.apply(lambda r: r.notna().sum(), axis=1)
         baslik = int(dolu.idxmax())
 
-    df = pd.read_excel(dosya, engine=engine, skiprows=baslik, header=0)
+    df = okuyucu(skiprows=baslik, header=0)
     df = df.dropna(how='all').reset_index(drop=True)
 
     # Başlık satırı tekrar veri olarak geldiyse at
@@ -269,6 +296,116 @@ def _gecersizlik_nedeni(x) -> str:
     if s == s[0] * len(s):
         return f'Yer tutucu/sahte kimlik ({s})'
     return 'Geçersiz'
+
+# ══════════════════════════════════════════
+#  KRİTER DOĞRULAMA & DOĞRULUK KONTROLLERİ
+#  (hepsi saf/yan etkisiz — yalnızca veri döndürür, iş kuralını değiştirmez)
+# ══════════════════════════════════════════
+def kriter_dogrula(esik_tek, esik_toplam, yuzde80):
+    """Kullanıcının girdiği kriterleri mantıklı aralıkta mı diye denetler.
+    (ok: bool, mesaj: str) döndürür; ok False ise mesaj kullanıcıya gösterilecek
+    Türkçe hatadır. İş kuralını değiştirmez, yalnızca hatalı girişi engeller."""
+    try:
+        et, eto, y = float(esik_tek), float(esik_toplam), float(yuzde80)
+    except (TypeError, ValueError):
+        return (False, "Kriter değerleri sayı olmalıdır.")
+    if et <= 0 or eto <= 0:
+        return (False, "Fatura limitleri 0'dan büyük olmalıdır.")
+    if not (0 < y <= 100):
+        return (False, "Kapsam yüzdesi 0 ile 100 arasında olmalıdır.")
+    return (True, "")
+
+def bulunan_sutunlar(df):
+    """İşlem öncesi önizleme için: kritik alanların hangi başlıklara eşlendiğini
+    (etiket → sütun adı / None) sözlüğü olarak döndürür."""
+    K = list(df.columns)
+    return {
+        'VKN/TC':    sutun_bul(K, ['vergi kimlik', 'vkn', 'tc kimlik']),
+        'Tarih':     sutun_bul(K, ['alış faturasının tarihi', 'fatura tarihi', 'tarih']),
+        'Fatura No': sutun_bul(K, ['alış faturasının sıra no', 'fatura no']),
+        'Matrah':    sutun_bul(K, ['kdv hariç tutarı', 'faturanın tutarı']),
+        'KDV':       kdv_sutunu_bul(K) or sutun_bul(K, ['toplam indirilecek kdv']),
+        'Ünvan':     sutun_bul(K, ['satıcının adı', 'ünvanı', 'unvan']),
+    }
+
+def kdv_tutarlilik_kontrol(df):
+    """KDV sütunu ile matrah sütununun oranına bakar; oran makul KDV oranlarından
+    (yaklaşık %1–%20) belirgin uzaksa, muhtemel yanlış sütun eşleşmesine karşı
+    uyarı üretir. [(mesaj, tip), ...] döndürür; sorun yoksa boş liste.
+    Yalnızca uyarır — seçimi/iş kuralını etkilemez."""
+    K = list(df.columns)
+    matrah_col = sutun_bul(K, ['kdv hariç tutarı', 'faturanın tutarı'])
+    kdv_col = kdv_sutunu_bul(K) or sutun_bul(K, ['toplam indirilecek kdv'])
+    if not matrah_col or not kdv_col or matrah_col == kdv_col:
+        return []
+    oranlar = []
+    for mv, kv in zip(df[matrah_col].apply(para_deger), df[kdv_col].apply(para_deger)):
+        if mv and kv is not None and mv > 0:
+            oranlar.append(kv / mv)
+    if not oranlar:
+        return []
+    oranlar.sort()
+    medyan = oranlar[len(oranlar) // 2]
+    makul = (0.01, 0.08, 0.10, 0.18, 0.20)
+    if min(abs(medyan - r) for r in makul) > 0.03:
+        return [(f"  ⚠️  KDV/matrah oranı medyanı %{medyan*100:.1f} — beklenen KDV "
+                 f"oranlarına (%1–%20) uzak. KDV ve matrah sütunlarının doğru "
+                 f"eşleştiğini kontrol edin.", "warn")]
+    return []
+
+def mukerrer_fatura_bul(df):
+    """Aynı (VKN, fatura no) ikilisinin birden çok satırda geçtiği mükerrer
+    kayıtları bulur. [(vkn, fatura_no, adet), ...] döndürür (adet > 1).
+    Yalnızca uyarı amaçlıdır; satırları silmez."""
+    K = list(df.columns)
+    vkn_col = sutun_bul(K, ['vergi kimlik', 'vkn', 'tc kimlik'])
+    fno_col = sutun_bul(K, ['alış faturasının sıra no', 'fatura no'])
+    if not vkn_col or not fno_col:
+        return []
+    say = {}
+    for v, f in zip(df[vkn_col], df[fno_col]):
+        vs = str(v).strip().replace('.0', '')
+        fs = str(f).strip()
+        if vs.lower() in ('', 'nan', 'none', 'nat') or fs.lower() in ('', 'nan', 'none', 'nat'):
+            continue
+        say[(vs, fs)] = say.get((vs, fs), 0) + 1
+    return [(v, f, a) for (v, f), a in say.items() if a > 1]
+
+def _ay_yil(val):
+    """Bir tarih değerinden 'AA.YYYY' döndürür; ayrıştırılamazsa None.
+    tarih_fmt ile aynı biçim önceliğini (önce ISO, sonra gün.ay.yıl) izler ki
+    bu kod tabanının tarih düzeniyle tutarlı ve tek anlamlı olsun."""
+    if pd.isna(val):
+        return None
+    if isinstance(val, datetime):      # pd.Timestamp da datetime alt-sınıfıdır
+        return val.strftime('%m.%Y')
+    s = str(val).strip()
+    if not s:
+        return None
+    for fmt in ('%Y-%m-%d', '%d.%m.%Y', '%d/%m/%Y', '%Y.%m.%d'):
+        try:
+            return datetime.strptime(s[:10], fmt).strftime('%m.%Y')
+        except ValueError:
+            continue
+    try:                               # son çare: pandas (TR için gün-önce)
+        d = pd.to_datetime(s, errors='coerce', dayfirst=True)
+        return None if pd.isna(d) else d.strftime('%m.%Y')
+    except Exception:
+        return None
+
+def donem_disi_tarih_kontrol(df, donem):
+    """Fatura tarihlerinden kaçının seçilen dönem (AA.YYYY) ay/yılı DIŞINDA
+    olduğunu (toplam_tarihli, donem_disi) olarak döndürür. Yanlış dönem dosyasını
+    yakalamaya yarayan bir uyarı ölçütüdür. Tarih sütunu yoksa (0, 0)."""
+    K = list(df.columns)
+    tarih_col = sutun_bul(K, ['alış faturasının tarihi', 'fatura tarihi', 'tarih'])
+    if not tarih_col:
+        return (0, 0)
+    aylar = [a for a in (_ay_yil(v) for v in df[tarih_col]) if a]
+    if not aylar:
+        return (0, 0)
+    disi = sum(1 for a in aylar if a != donem)
+    return (len(aylar), disi)
 
 # ══════════════════════════════════════════
 #  FİLTRELEME
@@ -526,6 +663,135 @@ def firma_excel_olustur(firma_df, cikis_dosya, tum_kolonlar):
     return guvenli_kaydet(wb, cikis_dosya)
 
 # ══════════════════════════════════════════
+#  PDF ÇIKTI (opsiyonel — reportlab varsa)
+# ══════════════════════════════════════════
+def _pdf_font_bul():
+    """Türkçe karakterleri düzgün gösteren bir TTF'yi reportlab'a kaydeder;
+    bulunursa kayıtlı font adını, bulunamazsa 'Helvetica' döndürür (Helvetica
+    bazı Türkçe karakterleri bozabilir, bu yüzden Unicode TTF tercih edilir)."""
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+    except Exception:
+        return 'Helvetica'
+    adaylar = [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+        'C:\\Windows\\Fonts\\arial.ttf',
+        'C:\\Windows\\Fonts\\segoeui.ttf',
+        '/Library/Fonts/Arial.ttf',
+        '/System/Library/Fonts/Supplemental/Arial.ttf',
+    ]
+    for y in adaylar:
+        try:
+            if os.path.exists(y):
+                pdfmetrics.registerFont(TTFont('TutanakFont', y))
+                return 'TutanakFont'
+        except Exception:
+            continue
+    return 'Helvetica'
+
+def pdf_destekli():
+    """reportlab kurulu mu? (PDF üretimi opsiyoneldir)"""
+    try:
+        import reportlab  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+def firma_pdf_olustur(firma_df, pdf_dosya, tum_kolonlar, vkn='', unvan='', donem=''):
+    """Bir firmanın tutanağının okunur bir PDF kopyasını üretir (arşiv/imza için).
+    Resmî yükleme dosyası Excel'dir; PDF yalnızca insan-okur kopyadır.
+    reportlab kurulu değilse ImportError yükseltir (çağıran atlar)."""
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                    Paragraph, Spacer)
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+    font = _pdf_font_bul()
+    tarih_col    = sutun_bul(tum_kolonlar, ["alış faturasının tarihi"])
+    faturano_col = sutun_bul(tum_kolonlar, ["alış faturasının sıra no"])
+    seri_col     = seri_sutunu_bul(tum_kolonlar, tarih_col, faturano_col)
+    tutar_col    = sutun_bul(tum_kolonlar, ["kdv hariç tutarı", "faturanın tutarı"])
+    kdv_col      = kdv_sutunu_bul(tum_kolonlar) or sutun_bul(tum_kolonlar, ["toplam indirilecek kdv"])
+    aciklama_col = sutun_bul(tum_kolonlar, ["alınan mal ve/veya hizmetin cinsi", "hizmetin cinsi", "cinsi"]) \
+                   or sutun_bul(tum_kolonlar, ["açıklama"])
+
+    def _para_str(v):
+        f = para_deger(v)
+        return '' if f is None else f'{f:,.2f}'.replace(',', '¤').replace('.', ',').replace('¤', '.')
+
+    basliklar = ["Tarih", "Seri", "Fatura No", "Matrah (TL)", "KDV (TL)", "Açıklama"]
+    satirlar = [basliklar]
+    top_matrah = top_kdv = 0.0
+    for _, row in firma_df.iterrows():
+        seri_val = ''
+        if seri_col:
+            sv = row.get(seri_col, None)
+            if pd.notna(sv) and str(sv).strip() not in ('', 'None', 'nan'):
+                seri_val = str(sv).strip()
+        if seri_val and faturano_col:
+            fno_ayni = row.get(faturano_col, None)
+            if pd.notna(fno_ayni) and str(fno_ayni).strip() == seri_val:
+                seri_val = ''
+        mv = para_deger(row.get(tutar_col, None)) if tutar_col else None
+        kv = para_deger(row.get(kdv_col, None)) if kdv_col else None
+        top_matrah += mv or 0.0
+        top_kdv    += kv or 0.0
+        fno = row.get(faturano_col, None) if faturano_col else None
+        acik = row.get(aciklama_col, None) if aciklama_col else None
+        satirlar.append([
+            tarih_fmt(row.get(tarih_col, None)) if tarih_col else '',
+            seri_val,
+            '' if pd.isna(fno) else str(fno).strip(),
+            _para_str(mv), _para_str(kv),
+            '' if (acik is None or pd.isna(acik)) else str(acik).strip()[:40],
+        ])
+    satirlar.append(["", "", "TOPLAM", _para_str(top_matrah), _para_str(top_kdv), ""])
+
+    styles = getSampleStyleSheet()
+    bas_st = ParagraphStyle('bas', parent=styles['Title'], fontName=font, fontSize=13)
+    alt_st = ParagraphStyle('alt', parent=styles['Normal'], fontName=font, fontSize=9)
+    dip_st = ParagraphStyle('dip', parent=styles['Normal'], fontName=font,
+                            fontSize=7, textColor=colors.grey)
+
+    doc = SimpleDocTemplate(pdf_dosya, pagesize=landscape(A4),
+                            topMargin=15*mm, bottomMargin=12*mm,
+                            leftMargin=12*mm, rightMargin=12*mm)
+    icerik = [
+        Paragraph("KARŞIT İNCELEME TUTANAĞI (okunur kopya)", bas_st),
+        Spacer(1, 4*mm),
+        Paragraph(f"<b>Ünvan:</b> {unvan or '-'} &nbsp;&nbsp; "
+                  f"<b>VKN/TC:</b> {vkn or '-'} &nbsp;&nbsp; "
+                  f"<b>Dönem:</b> {donem or '-'} &nbsp;&nbsp; "
+                  f"<b>Fatura sayısı:</b> {len(firma_df)}", alt_st),
+        Spacer(1, 4*mm),
+    ]
+    genislik = [26*mm, 16*mm, 42*mm, 34*mm, 30*mm, 90*mm]
+    t = Table(satirlar, colWidths=genislik, repeatRows=1)
+    t.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), font),
+        ('FONTSIZE', (0, 0), (-1, -1), 7.5),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1A1A2E')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#EDEFF5')),
+        ('FONTNAME', (0, -1), (-1, -1), font),
+        ('ALIGN', (3, 0), (4, -1), 'RIGHT'),
+        ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#B8BEC9')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor('#F7F8FB')]),
+    ]))
+    icerik.append(t)
+    icerik.append(Spacer(1, 6*mm))
+    icerik.append(Paragraph(
+        "Not: Resmî yükleme dosyası ilgili Excel tutanağıdır; bu PDF yalnızca "
+        "okunur/arşiv kopyasıdır.", dip_st))
+    doc.build(icerik)
+    return pdf_dosya
+
+# ══════════════════════════════════════════
 #  ÖZET RAPOR
 # ══════════════════════════════════════════
 def ozet_rapor_olustur(df, secilen, df_gecersiz, esik_tek, esik_toplam,
@@ -584,20 +850,72 @@ def ozet_rapor_olustur(df, secilen, df_gecersiz, esik_tek, esik_toplam,
 # ══════════════════════════════════════════
 #  ANA İŞLEM
 # ══════════════════════════════════════════
-def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, log_cb, tamam_cb,
-                   ilerleme_cb=None):
+def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb,
+                   ilerleme_cb=None, cikis_kok=None, pdf_uret=False):
     # ilerleme_cb(tamamlanan, toplam): GUI ilerleme çubuğunu günceller.
     # None geçilirse (ör. başsız test) hiçbir şey yapmaz.
+    # cikis_kok: çıktı klasörünün üst dizini (None → kaynak dosyanın yanı).
+    # pdf_uret: her firma için Excel'in yanına okunur bir PDF kopyası da üret.
     def _ilerle(t, top):
         if ilerleme_cb:
             try: ilerleme_cb(t, top)
             except Exception: pass
+
+    # Tüm günlük satırlarını sakla ki sonunda kalıcı bir .txt olarak yazılabilsin
+    # (denetim izi). log_cb burada kasıtlı olarak gölgelenir; içerideki tüm
+    # log_cb(...) çağrıları hem ekrana hem bu tampona yazar.
+    _gunluk_kayit = []
+    def log_cb(msg, tip=''):
+        _gunluk_kayit.append(str(msg))
+        _ekrana_log(msg, tip)
+
+    def _gunlugu_yaz(klasor, donem):
+        try:
+            yol = Path(klasor) / f"ISLEM_GUNLUGU_{donem.replace('.','_')}.txt"
+            baslik = (f"e-YMM Karşıt İnceleme Asistanı v{SURUM}\n"
+                      f"Çalışma zamanı: {datetime.now():%d.%m.%Y %H:%M:%S}\n"
+                      f"Kaynak dosya: {Path(kaynak).name}\n"
+                      f"Kriterler: tek≥{esik_tek:,.0f}  toplam≥{esik_toplam:,.0f}  "
+                      f"kapsam=%{float(yuzde80):.0f}\n" + "="*60 + "\n")
+            with open(yol, 'w', encoding='utf-8') as f:
+                f.write(baslik + "\n".join(_gunluk_kayit) + "\n")
+            return yol
+        except Exception:
+            return None
+
     try:
         _ilerle(0, 1)
         log_cb("📂 Dosya okunuyor...", "info")
         df    = ana_listeyi_oku(kaynak)
         donem = donem_bul(Path(kaynak).stem, df)
-        log_cb(f"📅 Dönem: {donem}", "info")
+
+        # ── İşlem öncesi ÖN BİLGİ (yanlış dosya/kolon baştan yakalansın) ──
+        log_cb(f"{'─'*50}", "info")
+        log_cb("📋 ÖN BİLGİ (işlemden önce kontrol edin):", "info")
+        log_cb(f"   Satır sayısı: {len(df)}   |   Dönem: {donem}", "info")
+        for etiket, sut in bulunan_sutunlar(df).items():
+            if sut:
+                log_cb(f"   ✔ {etiket:10}→ \"{str(sut)[:45]}\"", "ok")
+            else:
+                log_cb(f"   ✘ {etiket:10}→ (bulunamadı)", "warn")
+
+        # ── Doğruluk uyarıları (yalnızca uyarır, seçimi etkilemez) ──
+        for m, t in kdv_tutarlilik_kontrol(df):
+            log_cb(m, t)
+        mukerrer = mukerrer_fatura_bul(df)
+        if mukerrer:
+            log_cb(f"  ⚠️  {len(mukerrer)} mükerrer fatura (aynı VKN + fatura no) "
+                   f"birden çok satırda görünüyor:", "warn")
+            for v, f, adet in mukerrer[:10]:
+                log_cb(f"     • VKN {v}  fatura {f}  ×{adet}", "warn")
+            if len(mukerrer) > 10:
+                log_cb(f"     … ve {len(mukerrer)-10} tane daha", "warn")
+        t_toplam, t_disi = donem_disi_tarih_kontrol(df, donem)
+        if t_toplam and t_disi / t_toplam > 0.3:
+            log_cb(f"  ⚠️  {t_disi}/{t_toplam} faturanın tarihi seçilen dönem "
+                   f"({donem}) dışında — yanlış dönem dosyası olabilir.", "warn")
+        log_cb(f"{'─'*50}", "info")
+
         log_cb("🔍 Firmalar filtreleniyor...", "info")
 
         secilen, df_gecersiz = firmalari_filtrele(df, esik_tek, esik_toplam, yuzde80, log_cb)
@@ -606,8 +924,9 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, log_cb, tamam_cb,
             log_cb("⚠️  Hiçbir firma kriterleri karşılamıyor.", "warn")
             tamam_cb(None, 0, 0); return
 
-        cikis_kl = Path(kaynak).parent / "Hazır Tutanaklar"
-        cikis_kl.mkdir(exist_ok=True)
+        cikis_taban = Path(cikis_kok) if cikis_kok else Path(kaynak).parent
+        cikis_kl = cikis_taban / "Hazır Tutanaklar"
+        cikis_kl.mkdir(parents=True, exist_ok=True)
 
         # Klasörde eski Excel dosyası varsa uyar
         eski_dosyalar = list(cikis_kl.glob("*.xlsx"))
@@ -618,11 +937,18 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, log_cb, tamam_cb,
             yedek_kl = cikis_kl.parent / f"Hazır Tutanaklar_{zaman_damgasi}"
             cikis_kl.rename(yedek_kl)
             log_cb(f"   Eski klasör: {yedek_kl.name}", "warn")
-            cikis_kl = Path(kaynak).parent / "Hazır Tutanaklar"
-            cikis_kl.mkdir(exist_ok=True)
+            cikis_kl = cikis_taban / "Hazır Tutanaklar"
+            cikis_kl.mkdir(parents=True, exist_ok=True)
             log_cb(f"   Yeni klasör oluşturuldu.", "ok")
 
         log_cb(f"📁 Klasör: {cikis_kl}", "info")
+        # PDF isteniyor ama reportlab yoksa: kullanıcıyı bir kez uyar, Excel'e devam et
+        if pdf_uret and not pdf_destekli():
+            log_cb("  ⚠️  PDF üretimi için 'reportlab' kurulu değil; yalnızca Excel "
+                   "üretilecek. (pip install reportlab)", "warn")
+            pdf_uret = False
+        if pdf_uret:
+            log_cb("  🧾 PDF kopyalar da üretilecek.", "info")
         log_cb(f"{'─'*50}", "info")
 
         unvan_col = sutun_bul(list(df.columns), ['satıcının adı', 'ünvanı'])
@@ -647,10 +973,18 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, log_cb, tamam_cb,
                 temiz = dosya_adi_temizle(unvan) if unvan else vkn
                 ad    = f"{sira_no}) {donem.replace('.','_')}_{vkn}_{temiz}.xlsx"
                 dosya = str(cikis_kl / ad)
-                firma_excel_olustur(grp, dosya, list(df.columns))
+                kayitli_yol = firma_excel_olustur(grp, dosya, list(df.columns))
                 basarili += 1
                 vkn_sirali.append((sira_no, vkn, unvan, ornek_fno))
                 log_cb(f"  [{sira_no:3}/{len(secilen)}] ✔ {vkn}  {unvan[:35]}", "ok")
+                # PDF kopya (opsiyonel) — hata olursa Excel'i etkilemez, sadece uyarır
+                if pdf_uret:
+                    try:
+                        pdf_yol = str(Path(kayitli_yol).with_suffix('.pdf'))
+                        firma_pdf_olustur(grp, pdf_yol, list(df.columns),
+                                          vkn=vkn, unvan=unvan, donem=donem)
+                    except Exception as pe:
+                        log_cb(f"      ⚠️ PDF üretilemedi ({vkn}): {pe}", "warn")
             except Exception as e:
                 sira_no -= 1   # başarısız → numarayı geri al ki sonraki dosyada atlama olmasın
                 hatali.append((vkn, unvan, str(e)))
@@ -745,11 +1079,21 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, log_cb, tamam_cb,
         except Exception as e:
             log_cb(f"⚠️  Özet rapor yazılamadı: {e}", "warn")
 
+        # ── İşlem günlüğünü kalıcı olarak yaz (denetim izi) ──
+        gyol = _gunlugu_yaz(cikis_kl, donem)
+        if gyol:
+            log_cb(f"📝 İşlem günlüğü: {Path(gyol).name}", "ok")
+
         log_cb(f"📁 {cikis_kl}", "ok")
         tamam_cb(str(cikis_kl), basarili, len(hatali))
 
     except Exception as e:
         log_cb(f"\n❌ {e}", "err")
+        # Hata olsa bile günlüğü kaydetmeye çalış (kaynağın yanına)
+        try:
+            _gunlugu_yaz(Path(cikis_kok) if cikis_kok else Path(kaynak).parent, "HATA")
+        except Exception:
+            pass
         tamam_cb(None, 0, 1)
 
 # ══════════════════════════════════════════
@@ -764,7 +1108,7 @@ F_CON=('Consolas',9)
 class KDVBolmeApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("YMM Karşıt İnceleme Asistanı")
+        self.root.title(f"YMM Karşıt İnceleme Asistanı  v{SURUM}")
         self.root.geometry("780x620")
         self.root.minsize(780, 580)
         self.root.configure(bg=APP)
@@ -783,6 +1127,8 @@ class KDVBolmeApp:
         self.esik_tek    = tk.StringVar(value=ayar.get("esik_tek",    "150000"))
         self.esik_toplam = tk.StringVar(value=ayar.get("esik_toplam", "450000"))
         self.yuzde80     = tk.StringVar(value=ayar.get("yuzde80",     "80"))
+        self._cikis_kok  = ayar.get("cikis_kok") or None   # çıktı klasörü (None → kaynağın yanı)
+        self.pdf_uret    = tk.BooleanVar(value=bool(ayar.get("pdf_uret", False)))
 
         self._ui()
         self._surukle_birak()
@@ -806,6 +1152,8 @@ class KDVBolmeApp:
                     "esik_tek":    self.esik_tek.get(),
                     "esik_toplam": self.esik_toplam.get(),
                     "yuzde80":     self.yuzde80.get(),
+                    "cikis_kok":   self._cikis_kok or "",
+                    "pdf_uret":    bool(self.pdf_uret.get()),
                 }, f, ensure_ascii=False)
         except Exception:
             pass
@@ -843,6 +1191,24 @@ class KDVBolmeApp:
                           "belirtilen % karşılanana kadar devam eder.",
                  font=('Segoe UI',8), bg=APP, fg=GRI, justify='left').pack(
                  fill='x', pady=(6,0))
+
+        # ── Seçenekler (PDF + çıktı klasörü) ──
+        sf = tk.LabelFrame(sol, text="  Seçenekler  ",
+                           font=('Segoe UI',9,'bold'),
+                           bg=APP, fg=KOYU, relief='solid', bd=1,
+                           padx=10, pady=6)
+        sf.pack(fill='x', pady=(0,10))
+        tk.Checkbutton(sf, text="Excel'in yanına PDF kopya da üret",
+                       variable=self.pdf_uret, onvalue=True, offvalue=False,
+                       font=F_KUC, bg=APP, fg=KOYU, activebackground=APP,
+                       anchor='w', command=self._ayar_kaydet).pack(fill='x')
+        cf = tk.Frame(sf, bg=APP); cf.pack(fill='x', pady=(4,0))
+        tk.Button(cf, text="Çıktı klasörü…", font=('Segoe UI',8),
+                  bg=KART, fg=KOYU, relief='solid', bd=1,
+                  command=self._cikis_klasoru_sec).pack(side='left')
+        self.cikis_lbl = tk.Label(cf, text=self._cikis_ozet(), font=('Segoe UI',8),
+                                  bg=APP, fg=GRI, anchor='w')
+        self.cikis_lbl.pack(side='left', padx=(6,0), fill='x', expand=True)
 
         # ── Sürükle-bırak ──
         self.birak = tk.Frame(sol, bg=KART, relief='solid', bd=1, cursor='hand2')
@@ -945,45 +1311,108 @@ class KDVBolmeApp:
         try:
             import tkinterdnd2
             self.root.drop_target_register(tkinterdnd2.DND_FILES)
-            self.root.dnd_bind('<<Drop>>', lambda e: self._isle(
-                e.data.strip().strip('{}')))
+            self.root.dnd_bind('<<Drop>>',
+                               lambda e: self._isle_coklu(self._dnd_ayikla(e.data)))
         except: pass
 
-    def _tiklayarak_sec(self, e=None):
-        d = filedialog.askopenfilename(
-            title="Ana KDV Listesini Seçin",
-            filetypes=[("Excel","*.xls *.xlsx"),("Tümü","*.*")])
-        if d: self._isle(d)
+    @staticmethod
+    def _dnd_ayikla(data):
+        """Sürükle-bırak verisinden dosya yollarını ayıklar. Boşluklu yollar
+        {..} içinde gelir ve birden çok dosya bırakılabilir."""
+        parcalar = re.findall(r'\{([^}]*)\}|(\S+)', str(data))
+        return [a or b for a, b in parcalar if (a or b)]
+
+    def _cikis_ozet(self):
+        if self._cikis_kok:
+            return f"→ {Path(self._cikis_kok).name or self._cikis_kok}"
+        return "(kaynağın yanı)"
+
+    def _cikis_klasoru_sec(self):
+        d = filedialog.askdirectory(
+            title="Çıktı klasörünü seçin (İptal → kaynak dosyanın yanı)")
+        self._cikis_kok = d or None
+        try:
+            self.cikis_lbl.config(text=self._cikis_ozet())
+        except Exception:
+            pass
+        self._ayar_kaydet()
+
+    def _kriter_al(self):
+        """Kriter alanlarını okuyup doğrular. Geçerliyse (True, (et,eto,y)),
+        değilse kullanıcıya hata gösterip (False, None) döner."""
+        try:
+            et  = float(self.esik_tek.get().replace('.','').replace(',','.'))
+            eto = float(self.esik_toplam.get().replace('.','').replace(',','.'))
+            y   = float(self.yuzde80.get().replace(',','.'))
+        except Exception:
+            messagebox.showerror("Hata", "Kriter değerleri geçersiz.\nSadece sayı girin.")
+            return (False, None)
+        ok, mesaj = kriter_dogrula(et, eto, y)
+        if not ok:
+            messagebox.showerror("Geçersiz kriter", mesaj)
+            return (False, None)
+        return (True, (et, eto, y))
 
     def _isle(self, dosya):
+        """Tek dosya — toplu işleyiciye yönlendirir (DND/uyum için korunur)."""
+        self._isle_coklu([dosya])
+
+    def _isle_coklu(self, dosyalar):
         if self._isleniyor:
             self._log("⚠️  İşlem devam ediyor...", "warn"); return
-        if Path(dosya).suffix.lower() not in ('.xls','.xlsx'):
-            self._log("❌ Geçersiz format.", "err"); return
-        try:
-            esik_tek    = float(self.esik_tek.get().replace('.','').replace(',','.'))
-            esik_toplam = float(self.esik_toplam.get().replace('.','').replace(',','.'))
-            yuzde80     = float(self.yuzde80.get().replace(',','.'))
-        except:
-            messagebox.showerror("Hata", "Kriter değerleri geçersiz.\nSadece sayı girin.")
+        FORMATLAR = ('.xls', '.xlsx', '.csv', '.txt')
+        gecerli = [d for d in dosyalar if Path(d).suffix.lower() in FORMATLAR]
+        for d in dosyalar:
+            if Path(d).suffix.lower() not in FORMATLAR:
+                self._log(f"❌ Desteklenmeyen format atlandı: {Path(d).name}", "err")
+        if not gecerli:
+            self._log("❌ İşlenecek geçerli dosya yok (.xls/.xlsx/.csv/.txt).", "err")
             return
 
-        # Kullanılan kriterleri bir sonraki açılış için sakla
+        ok, kriter = self._kriter_al()
+        if not ok:
+            return
+        esik_tek, esik_toplam, yuzde80 = kriter
+        pdf_uret = bool(self.pdf_uret.get())   # ana thread'de oku, worker'a geçir
         self._ayar_kaydet()
 
         self._isleniyor = True
         self._birak_guncelle("⏳ İşleniyor...", TURUNCU)
-        self.durum_lbl.config(text=Path(dosya).name, fg=KOYU)
-        self._ilerleme(0, 0)   # çubuğu sıfırla
-        self._log(f"\n{'═'*50}", "info")
-        self._log(f"📂 {Path(dosya).name}", "info")
+        self._ilerleme(0, 0)
+        self.durum_lbl.config(
+            text=(f"{len(gecerli)} dosya işleniyor…" if len(gecerli) > 1
+                  else Path(gecerli[0]).name), fg=KOYU)
 
         threading.Thread(
-            target=dosyalari_isle,
-            args=(dosya, esik_tek, esik_toplam, yuzde80, self._log, self._tamam,
-                  self._ilerleme),
+            target=self._batch_worker,
+            args=(gecerli, esik_tek, esik_toplam, yuzde80, pdf_uret),
             daemon=True
         ).start()
+
+    def _batch_worker(self, dosyalar, esik_tek, esik_toplam, yuzde80, pdf_uret):
+        toplam_b = 0; toplam_h = 0; son_klasor = None
+        n = len(dosyalar)
+        for i, dosya in enumerate(dosyalar, 1):
+            self._log(f"\n{'═'*50}", "info")
+            onek = f"[{i}/{n}] " if n > 1 else ""
+            self._log(f"📂 {onek}{Path(dosya).name}", "info")
+            sonuc = {}
+            def _tamam_ic(kl, b, h, _s=sonuc):
+                _s['klasor'] = kl; _s['b'] = b; _s['h'] = h
+            try:
+                dosyalari_isle(dosya, esik_tek, esik_toplam, yuzde80,
+                               self._log, _tamam_ic, self._ilerleme,
+                               self._cikis_kok, pdf_uret)
+            except Exception as e:
+                self._log(f"❌ {e}", "err")
+            toplam_b += sonuc.get('b', 0); toplam_h += sonuc.get('h', 0)
+            if sonuc.get('klasor'):
+                son_klasor = sonuc['klasor']
+        if n > 1:
+            self._log(f"\n{'═'*50}", "info")
+            self._log(f"🏁 Toplu işlem bitti: {n} dosya → {toplam_b} tutanak"
+                      + (f", {toplam_h} hata" if toplam_h else ""), "ok")
+        self._tamam(son_klasor, toplam_b, toplam_h)
 
     def _log(self, msg, tip=''):
         def _():

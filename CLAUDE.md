@@ -63,6 +63,11 @@ alt-dize eşleşmesiyle bulur.
    fatura no, vergi kimlik no, Açıklama, **Borç** (=KDV), matrah".
    `_muhasebe_tipini_esle` bunu standart GİB adlarına çevirir.
 
+Dosya biçimi olarak **`.xlsx`, `.xls`, `.csv` ve `.txt`** desteklenir. CSV/TXT
+için kodlama (UTF-8 / cp1254) ve ayraç (`;`, sekme, `,`) otomatik saptanır
+(`_csv_okuyucu_hazirla`); okuyucu, `read_excel` ile aynı arayüzde (header/skiprows)
+çalışır, böylece başlık bulma ve muhasebe eşleme mantığı değişmeden geçerlidir.
+
 **Yeni bir liste tipi eklerken:** genelde sadece (a) `sutun_bul` arama
 terimlerini genişletmek veya (b) `_muhasebe_tipini_esle` benzeri bir eşleme
 eklemek yeterlidir. Programın geri kalanı standart sütun adlarıyla çalışır.
@@ -95,6 +100,11 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 - `OZET_RAPOR_DÖNEM.xlsx` — tek sayfalık çalışma özeti: liste toplamı, hedef
   tutar, seçilen/oluşturulan firma sayısı, **gerçek kapsam %**, geçersiz satır
   sayısı ve tutarı. Sadece raporlar; iş kuralını yeniden hesaplamaz.
+- `ISLEM_GUNLUGU_DÖNEM.txt` — o çalışmanın tüm ekran günlüğü (denetim izi):
+  başlık olarak sürüm, zaman, kaynak dosya ve kullanılan kriterler.
+- `N) …_.pdf` — **opsiyonel** okunur PDF kopyası (yalnızca `reportlab` kuruluysa ve
+  kullanıcı "PDF üret"i işaretlerse; `firma_pdf_olustur`). Resmî yükleme dosyası
+  yine Excel'dir; PDF arşiv/imza kopyasıdır.
 
 ---
 
@@ -112,12 +122,19 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `para_oku` | ESKİ ayrıştırıcı — binlik ayraçta 0 döner. Yeni kodda KULLANMA. |
 | `donem_bul` | Dönemi bulur: ay adı → sayısal ay+yıl → veri tarihleri → bugün. Ay adı eşleşmesi Türkçe karakter duyarsızdır (NISAN = NİSAN). |
 | `ozet_rapor_olustur` | Çalışmanın tek sayfalık kapsam özetini üretir (openpyxl Workbook + gerçek kapsam % döndürür). |
+| `kriter_dogrula` | Eşik/yüzde girdilerini mantıklı aralıkta mı diye denetler (GUI hatalı girişi engeller). |
+| `bulunan_sutunlar` | İşlem öncesi önizleme: kritik alanların hangi başlıklara eşlendiğini döndürür. |
+| `kdv_tutarlilik_kontrol` | KDV/matrah oranı makul KDV oranlarından uzaksa yanlış sütun eşleşmesine karşı uyarır (yalnızca uyarı). |
+| `mukerrer_fatura_bul` | Aynı (VKN, fatura no) birden çok satırda mı diye bakar (yalnızca uyarı). |
+| `_ay_yil` / `donem_disi_tarih_kontrol` | Tarihleri tek-anlamlı ayrıştırır; dönem dışı fatura oranını verir (yanlış dönem dosyası uyarısı). |
+| `_csv_okuyucu_hazirla` | CSV/TXT için kodlama+ayraç saptar; read_excel ile aynı arayüzde okuyucu döndürür. |
+| `firma_pdf_olustur` / `pdf_destekli` / `_pdf_font_bul` | Opsiyonel PDF kopya (reportlab varsa; Türkçe için Unicode TTF kaydeder). |
 | `_gecersizlik_nedeni` | Geçersiz VKN için insan-okur neden metni. |
 | `firmalari_filtrele` | **KALP.** VKN normalize, geçerli/geçersiz ayrım, 2 aşamalı %80 seçimi. |
 | `guvenli_kaydet` | Windows uzun yol (~260) sorununda dosya adını kısaltarak yeniden kaydeder. |
 | `firma_excel_olustur` | Tek firmanın tutanak Excel'ini şablona göre yazar. |
-| `dosyalari_isle` | Orkestrasyon: oku → filtrele → her firma için üret → yan dosyalar. Opsiyonel `ilerleme_cb(tamamlanan, toplam)` ile GUI ilerleme çubuğunu besler. |
-| `KDVBolmeApp` | Tkinter GUI (sürükle-bırak, eşik alanları, log kutusu, logo, **ilerleme çubuğu**, son kriterleri hatırlama). |
+| `dosyalari_isle` | Orkestrasyon: oku → **ön bilgi + doğruluk uyarıları** → filtrele → her firma için üret → yan dosyalar + kalıcı günlük. Opsiyonel `ilerleme_cb`, `cikis_kok` (çıktı klasörü), `pdf_uret`. |
+| `KDVBolmeApp` | Tkinter GUI (sürükle-bırak **çoklu/toplu**, eşik alanları + **doğrulama**, çıktı klasörü seçimi, **PDF onayı**, ilerleme çubuğu, log kutusu, logo, ayarları hatırlama). |
 
 Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 (her firma) `firma_excel_olustur` → `guvenli_kaydet`.
@@ -127,9 +144,12 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 ## 7. Çalıştırma, bağımlılıklar, derleme
 
 - Python 3, bağımlılıklar: `pandas`, `openpyxl`, `xlrd` (eski `.xls` için),
-  `pillow` (logo). Tkinter standart kütüphanede. Testler için: `pytest`.
-- Kullanıcı ayarları (son eşik/yüzde değerleri) `~/.exay_ayarlar.json` içinde
-  saklanır (Program Files gibi yazılamayan konumlarda sorun çıkmasın diye).
+  `pillow` (logo). **Opsiyonel:** `reportlab` (PDF kopya — yoksa program çalışır,
+  sadece PDF üretmez). Tkinter standart kütüphanede. Testler için: `pytest`.
+- Kullanıcı ayarları (son eşik/yüzde, **çıktı klasörü, PDF tercihi**)
+  `~/.exay_ayarlar.json` içinde saklanır (Program Files gibi yazılamayan
+  konumlarda sorun çıkmasın diye).
+- Sürüm sabiti: `SURUM` (GUI başlığında ve özet/günlükte gösterilir).
 - Geliştirme: `python exay.py` (GUI açılır).
 - `.exe` derleme: `derle.bat` (PyInstaller `--onefile --windowed`, logoyu
   `logo.ico` olarak gömer). Klasörde `exay.py` + `derle.bat` + `logo.ico`
@@ -145,8 +165,10 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 yöntemini otomatikleştirir). Çalıştırma:
 
 ```bash
-pytest -q        # 25 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
-                 # VKN normalizasyon, muhasebe eşleme, şablon çıktı, özet, uçtan uca
+pytest -q        # 43 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
+                 # VKN normalizasyon, üç liste tipi (yeni/eski GİB + muhasebe),
+                 # CSV okuma, kriter doğrulama, doğruluk uyarıları (kdv/mükerrer/
+                 # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca
 ```
 
 Gerçek GİB dosyaları depoda olmadığından testler üç liste tipini (yeni GİB,
@@ -188,6 +210,20 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - Geçersiz kimlikli satırlar tutanaklanamaz; kullanıcı kaynak listede
   düzeltirse kapsam iyileşir (program uyarıyor).
 - ~~GUI'de ilerleme çubuğu yok~~ → **eklendi** (firma sayısına göre dolar).
-- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`).
+- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 43 test).
+- ~~İşlem öncesi önizleme/uyarı yok~~ → **eklendi** (ÖN BİLGİ bloğu + KDV
+  tutarlılık, mükerrer fatura, dönem-dışı tarih uyarıları — hepsi yalnızca
+  uyarır, seçimi/iş kuralını etkilemez).
+- ~~İşlem günlüğü kalıcı değil~~ → **eklendi** (`ISLEM_GUNLUGU_DÖNEM.txt`).
+- ~~Eşik değeri sınır kontrolü yok~~ → **eklendi** (`kriter_dogrula`).
+- ~~Çıktı klasörü seçilemiyor~~ → **eklendi** (`cikis_kok` + GUI seçici).
+- ~~Toplu (batch) işleme yok~~ → **eklendi** (çoklu dosya seç / sürükle-bırak).
+- ~~CSV girdi yok~~ → **eklendi** (`.csv`/`.txt`, kodlama+ayraç otomatik).
+- ~~PDF çıktı yok~~ → **eklendi** (opsiyonel, `reportlab` varsa).
 - İlerleme çubuğu adım granülaritesi firma başınadır; tek bir firmanın çok
   büyük olması hâlinde ara ilerleme gösterilmez (yeterince ince).
+- Doğruluk kontrolleri (KDV oranı, mükerrer, dönem) **uyarı** niteliğindedir;
+  satır silmez / seçimi değiştirmez — kullanıcı kaynakta düzeltir.
+- PDF, GİB şablonuyla birebir değil; **okunur/arşiv** kopyasıdır (resmî dosya
+  Excel). Türkçe için bir Unicode TTF (DejaVuSans/Arial) gerekir; yoksa
+  Helvetica'ya düşer ve bazı Türkçe karakterler bozulabilir.
