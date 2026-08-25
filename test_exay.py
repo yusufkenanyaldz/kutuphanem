@@ -1,0 +1,279 @@
+"""exay.py için otomatik test paketi.
+
+CLAUDE.md §8 uyarınca headless çalışır (conftest.py tkinter'ı stub'lar) ve
+§2'deki iş kurallarını (2 aşamalı %80 seçimi, %80 paydası = tüm liste, geçersiz
+VKN'lerin geçersizliği, ardışık numaralandırma, sayısal tutar/KDV) doğrular.
+
+Gerçek GİB dosyaları bu depoda bulunmadığından, üç liste tipi (yeni GİB, eski
+GİB, muhasebe/191) sentetik olarak üretilir ve mantık bunlar üzerinde test edilir.
+
+Çalıştırma:  pytest -q
+"""
+import openpyxl
+import pandas as pd
+import pytest
+
+import exay
+
+
+# ── Sessiz log geri çağrısı ──────────────────────────────────────────────────
+def _sessiz(*a, **k):
+    pass
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Saf yardımcı fonksiyonlar
+# ══════════════════════════════════════════════════════════════════════════
+@pytest.mark.parametrize("girdi,beklenen", [
+    ("1.234.567,89", 1234567.89),   # TR binlik + ondalık
+    ("1,234,567.89", 1234567.89),   # EN binlik + ondalık
+    ("45927,50", 45927.5),          # TR ondalık
+    ("1234", 1234.0),
+    (1000, 1000.0),
+    (1000.5, 1000.5),
+    ("", None),
+    (None, None),
+    ("abc", None),
+    ("1500 ₺", 1500.0),            # para birimi işareti temizlenir
+    ("1.234,50 TL", 1234.5),       # TL eki + TR biçim
+])
+def test_para_deger(girdi, beklenen):
+    assert exay.para_deger(girdi) == beklenen
+
+
+def test_tarih_fmt():
+    assert exay.tarih_fmt("2026-04-15") == "15.04.2026"
+    assert exay.tarih_fmt("") == ""
+    # Tanınmayan biçim olduğu gibi döner
+    assert exay.tarih_fmt("15/04/2026") == "15/04/2026"
+
+
+def test_sayi_fmt():
+    assert exay.sayi_fmt(1000) == "1000"      # tam sayı → küsürat gösterilmez
+    assert exay.sayi_fmt("1234,5") == "1234,50"  # ondalıklı → 2 hane, virgüllü
+    assert exay.sayi_fmt("") == ""
+
+
+def test_kdv_sutunu_bul():
+    # Yeni tip (kesme işaretsiz) doğru seçilir, matrah/toplam KDV'siyle karışmaz
+    kols = ["Alış Faturasının KDV Hariç Tutarı", "KDV si", "Toplam İndirilecek KDV"]
+    assert exay.kdv_sutunu_bul(kols) == "KDV si"
+    # Eski tip (kesme işaretli)
+    assert exay.kdv_sutunu_bul(["Matrah", "KDV'si"]) == "KDV'si"
+    # Yalnızca yasaklı sütunlar varsa None
+    assert exay.kdv_sutunu_bul(["KDV Hariç Tutarı", "Toplam KDV"]) is None
+
+
+def test_seri_sutunu_bul():
+    kols = ["Tarih", "Seri", "No"]
+    assert exay.seri_sutunu_bul(kols, "Tarih", "No") == "Seri"
+    # Ayrı seri sütunu yok; tarihin sağındaki numara sütunudur → seri yok
+    kols2 = ["Tarih", "No"]
+    assert exay.seri_sutunu_bul(kols2, "Tarih", "No") is None
+
+
+def test_donem_bul_turkce_ay():
+    # Türkçe karakterli ve ASCII (diakritiksiz) ay adlarının ikisi de tanınmalı
+    assert exay.donem_bul("NİSAN_2026_liste") == "04.2026"
+    assert exay.donem_bul("NISAN_2026_liste") == "04.2026"   # ASCII yazım
+    assert exay.donem_bul("AGUSTOS 2025") == "08.2025"
+    # Sayısal ay + yıl
+    assert exay.donem_bul("04_2026_kdv") == "04.2026"
+
+
+def test_gecersizlik_nedeni():
+    assert "Boş" in exay._gecersizlik_nedeni("")
+    assert "kısa" in exay._gecersizlik_nedeni("123")
+    assert "uzun" in exay._gecersizlik_nedeni("123456789012")
+    assert "Sayısal değil" in exay._gecersizlik_nedeni("ABC123")
+    assert "tutucu" in exay._gecersizlik_nedeni("0000000000")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Sentetik liste üreticileri
+# ══════════════════════════════════════════════════════════════════════════
+def _yeni_gib_yaz(yol):
+    """Yeni GİB tipi liste: başlık 0. satırda, gerçek seri sütunu, 'KDV si'."""
+    satirlar = [
+        # (tarih, seri, no, matrah, kdv, unvan, vkn)
+        ("2026-04-01", "A", "BBK1", 200000, 36000, "FIRMA A", "1000000001"),  # tek≥150k
+        ("2026-04-02", "A", "BBK2", 300000, 54000, "FIRMA B", "1000000002"),  # B topl 600k
+        ("2026-04-03", "A", "BBK3", 300000, 54000, "FIRMA B", "1000000002"),
+        ("2026-04-04", "A", "BBK4", 100000, 18000, "FIRMA C", "1000000003"),  # eşik altı
+        ("2026-04-05", "A", "BBK5",  50000,  9000, "FIRMA D", "1000000004"),  # eşik altı
+        ("2026-04-06", "A", "BBK6",  40000,  7200, "FIRMA E", "0000000000"),  # geçersiz VKN
+    ]
+    kols = ["Alış Faturasının Tarihi", "Alış Faturasının Serisi",
+            "Alış Faturasının Sıra No'su", "Alış Faturasının KDV Hariç Tutarı",
+            "KDV si", "Satıcının Adı-Soyadı / Ünvanı",
+            "Satıcının Vergi Kimlik Numarası"]
+    df = pd.DataFrame(satirlar, columns=kols)
+    df.to_excel(yol, index=False)
+
+
+def _muhasebe_yaz(yol):
+    """Muhasebe (191) dökümü: Borç=KDV, Matrah=matrah, Satıcının sütunu yok."""
+    satirlar = [
+        ("191.01", "2026-01-10", "F1", "1000000001", "FIRMA A", 36000, 200000),
+        ("191.01", "2026-01-11", "F2", "1000000002", "FIRMA B",  9000,  50000),
+    ]
+    kols = ["Hesap Kodu", "Tarih", "Fatura No", "Vergi Kimlik No",
+            "Açıklama", "Borç", "Matrah"]
+    df = pd.DataFrame(satirlar, columns=kols)
+    df.to_excel(yol, index=False)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  İş kuralı testleri — firmalari_filtrele (KALP)
+# ══════════════════════════════════════════════════════════════════════════
+def test_filtrele_kapsam_ve_secim(tmp_path):
+    yol = tmp_path / "nisan.xlsx"
+    _yeni_gib_yaz(yol)
+    df = exay.ana_listeyi_oku(str(yol))
+
+    secilen, gecersiz = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
+
+    # A (tek fatura) ve B (toplam) seçilmeli; C ve D seçilmemeli
+    assert "1000000001" in secilen           # FIRMA A
+    assert "1000000002" in secilen           # FIRMA B
+    assert "1000000003" not in secilen        # FIRMA C
+    assert "1000000004" not in secilen        # FIRMA D
+
+    # Geçersiz VKN'li satır (0000000000) geçersizler listesinde olmalı
+    assert len(gecersiz) == 1
+
+    # §2/§3: %80 paydası = TÜM liste (geçersiz tutar dahil).
+    # Beklenen gerçek kapsam = (200000+600000) / 990000 = %80.8
+    tutar_col = exay.sutun_bul(list(df.columns),
+                               ['kdv hariç tutarı', 'faturanın tutarı'])
+    toplam_liste = df[tutar_col].apply(lambda v: exay.para_deger(v) or 0).sum()
+    secilen_tutar = sum(
+        grp[tutar_col].apply(lambda v: exay.para_deger(v) or 0).sum()
+        for grp, _ in secilen.values())
+    kapsam = secilen_tutar / toplam_liste * 100
+    assert toplam_liste == pytest.approx(990000)
+    assert kapsam == pytest.approx(80.8, abs=0.1)
+
+
+def test_filtrele_buyukten_kucuge_sirali(tmp_path):
+    yol = tmp_path / "nisan.xlsx"
+    _yeni_gib_yaz(yol)
+    df = exay.ana_listeyi_oku(str(yol))
+    secilen, _ = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
+    # Dosya isimlendirme için büyükten küçüğe sıralı olmalı → B(600k) önce, A(200k) sonra
+    anahtarlar = list(secilen.keys())
+    assert anahtarlar[0] == "1000000002"   # FIRMA B en büyük
+    assert anahtarlar[1] == "1000000001"   # FIRMA A
+
+
+def test_filtrele_vkn_onde_sifir_tamamlama(tmp_path):
+    """8-9 haneli VKN'lerde önde eksik sıfır otomatik tamamlanmalı ve geçerli sayılmalı."""
+    satirlar = [
+        ("2026-04-01", "A", "N1", 500000, 90000, "KISA VKN FIRMA", "71419747"),  # 8 hane
+    ]
+    kols = ["Alış Faturasının Tarihi", "Alış Faturasının Serisi",
+            "Alış Faturasının Sıra No'su", "Alış Faturasının KDV Hariç Tutarı",
+            "KDV si", "Satıcının Adı-Soyadı / Ünvanı",
+            "Satıcının Vergi Kimlik Numarası"]
+    yol = tmp_path / "kisa.xlsx"
+    pd.DataFrame(satirlar, columns=kols).to_excel(yol, index=False)
+    df = exay.ana_listeyi_oku(str(yol))
+    secilen, gecersiz = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
+    assert "0071419747" in secilen     # önde sıfır tamamlandı
+    assert len(gecersiz) == 0
+
+
+def test_filtrele_bos_liste_cokmez():
+    """Tümü sıfır/boş tutarlı liste bölme hatası vermeden çalışmalı (robustluk)."""
+    df = pd.DataFrame({
+        "Satıcının Vergi Kimlik Numarası": ["1000000001"],
+        "Alış Faturasının KDV Hariç Tutarı": [0],
+        "Satıcının Adı-Soyadı / Ünvanı": ["SIFIR FIRMA"],
+    })
+    secilen, gecersiz = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
+    assert isinstance(secilen, dict)   # çökmeden döndü
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Muhasebe tipi tanıma
+# ══════════════════════════════════════════════════════════════════════════
+def test_muhasebe_tipi_eslenir(tmp_path):
+    yol = tmp_path / "191.xlsx"
+    _muhasebe_yaz(yol)
+    df = exay.ana_listeyi_oku(str(yol))
+    # Standart GİB adlarına çevrilmiş olmalı
+    assert exay.sutun_bul(list(df.columns), ['kdv hariç tutarı']) is not None
+    assert exay.kdv_sutunu_bul(list(df.columns)) is not None
+    secilen, _ = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
+    assert "1000000001" in secilen     # tek fatura 200000 ≥ 150000
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Tutanak Excel çıktısı — şablon ve sayısal biçim
+# ══════════════════════════════════════════════════════════════════════════
+def test_firma_excel_sablon_ve_sayisal(tmp_path):
+    yol = tmp_path / "nisan.xlsx"
+    _yeni_gib_yaz(yol)
+    df = exay.ana_listeyi_oku(str(yol))
+    secilen, _ = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
+    grp = secilen["1000000001"][0]     # FIRMA A
+    cikti = tmp_path / "firma_a.xlsx"
+    exay.firma_excel_olustur(grp, str(cikti), list(df.columns))
+
+    wb = openpyxl.load_workbook(cikti)
+    ws = wb.active
+    basliklar = [ws.cell(1, c).value for c in range(1, len(exay.SABLON_SUTUNLAR) + 1)]
+    assert basliklar == exay.SABLON_SUTUNLAR
+    # 4. sütun tutar, 5. sütun KDV → GERÇEK SAYI olmalı (metin değil)
+    assert isinstance(ws.cell(2, 4).value, (int, float))
+    assert isinstance(ws.cell(2, 5).value, (int, float))
+    assert ws.cell(2, 4).value == pytest.approx(200000)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Özet rapor (yeni özellik)
+# ══════════════════════════════════════════════════════════════════════════
+def test_ozet_rapor(tmp_path):
+    yol = tmp_path / "nisan.xlsx"
+    _yeni_gib_yaz(yol)
+    df = exay.ana_listeyi_oku(str(yol))
+    secilen, gecersiz = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
+    wb, kapsam = exay.ozet_rapor_olustur(
+        df, secilen, gecersiz, 150000, 450000, 80, "04.2026",
+        basarili=len(secilen), hatali_sayisi=0)
+    assert kapsam == pytest.approx(80.8, abs=0.1)
+    ws = wb.active
+    metin = "\n".join(str(ws.cell(r, 1).value) for r in range(1, ws.max_row + 1))
+    assert "GERÇEK KAPSAM" in metin
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Uçtan uca — dosyalari_isle tutanakları + yan dosyaları üretir, ilerleme çağrılır
+# ══════════════════════════════════════════════════════════════════════════
+def test_dosyalari_isle_uctan_uca(tmp_path):
+    yol = tmp_path / "NISAN_2026.xlsx"
+    _yeni_gib_yaz(yol)
+
+    ilerleme_kayit = []
+    sonuc = {}
+
+    def _tamam(klasor, basarili, hatali):
+        sonuc['klasor'] = klasor
+        sonuc['basarili'] = basarili
+        sonuc['hatali'] = hatali
+
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, _tamam,
+                        ilerleme_cb=lambda t, top: ilerleme_kayit.append((t, top)))
+
+    assert sonuc['basarili'] == 2         # A ve B
+    assert sonuc['hatali'] == 0
+    cikis = tmp_path / "Hazır Tutanaklar"
+    dosyalar = [p.name for p in cikis.glob("*.xlsx")]
+    # 2 firma tutanağı + yan dosyalar (VKN listesi, geçersiz satırlar, özet)
+    assert any(n.startswith("1)") for n in dosyalar)
+    assert any(n.startswith("2)") for n in dosyalar)
+    assert any(n.startswith("VKN_LISTESI") for n in dosyalar)
+    assert any(n.startswith("GECERSIZ_SATIRLAR") for n in dosyalar)
+    assert any(n.startswith("OZET_RAPOR") for n in dosyalar)
+    # İlerleme geri çağrısı en az bir kez çağrılmış ve sona ulaşmış olmalı
+    assert ilerleme_kayit and ilerleme_kayit[-1] == (2, 2)
