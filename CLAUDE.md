@@ -141,7 +141,9 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `_doc_metni_oku` | Eski ikili `.doc`'un ana metnini çıkarır (olefile; WordDocument akışı UTF-16LE, 0x07→tab). Yalnızca okuma. |
 | `sablon_vkn_metinden` / `sablon_vkn_oku` | Tutanak metninden karşı firmanın (vkn, unvan) bilgisini "NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN" bloğundan çıkarır. |
 | `_vkn_metinden_ayikla` | Metinden 10-11 haneli VKN/TCKN (boşlukları temizler, 8-9→zfill, yer tutucu geçersiz) — filtreyle aynı normalize. |
-| `sablonlari_indeksle` | Klasördeki `.doc` şablonları VKN→yol olarak indeksler (alt klasörler dahil). |
+| `sablonlari_indeksle` | Klasördeki `.doc`/`.docx` şablonları VKN→(yol, blok) indeksler. **Çok-firmalı tek `.docx`** (bir dosyada N tutanak) tanınır: her firma bloğu ayrı indekslenir. |
+| `_docx_firma_bloklari` / `_docx_blok_belgesi` / `_sablon_kayitlari` | Birleşik `.docx`'i firma bloklarına ayırır (blok başı = "KATMA DEĞER…TUTANAĞI" başlığı), tek bloğu izole eder, dosyadaki tüm (vkn, unvan, blok) kayıtlarını verir. |
+| `_docx_govde_ekle` / `firmalar_tek_docx` | Doldurulmuş firma docx'lerini tek dosyada (her firma yeni sayfada) birleştirir. |
 | `firma_docx_olustur` / `docx_destekli` | `.docx` şablonu python-docx ile açıp fatura tablosunu doldurur, yeni `.docx` yazar (**Word gerektirmez**). |
 | `firma_word_olustur` / `word_destekli` | Eski `.doc` şablonu Word (COM) ile açıp fatura tablosunu günceller (Windows + Word). |
 | `firma_word_uret` / `sablon_uretilebilir_mi` | Uzantıya göre doğru üreticiyi seçer (.docx→python-docx, .doc→COM); ön koşulu denetler. `inceleme_dayanagi` geçirir. |
@@ -252,6 +254,11 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - **İnceleme Dayanağı (sözleşme):** GUI'den girilirse her Word tutanağının
   "İNCELEME DAYANAĞI" hücresi bununla ezilir — gözden kaçan eski yıl şablonları
   bile güncel sözleşmeyle çıkar. Boşsa şablondaki yazı aynen kalır.
+- **Çok-firmalı tek `.docx` şablon:** Bir dosyada birçok firmanın tutanağı
+  toplanmışsa (her blok "KATMA DEĞER…TUTANAĞI" başlığıyla), program dosyayı
+  bloklara ayırıp her firmayı VKN ile ayrı indeksler; üretirken ilgili firmanın
+  bloğunu izole edip fatura tablosunu doldurur. (Şimdilik `.docx`; `.doc` birleşik
+  dosya bölme desteklenmez.) Çıktıları tek dosyada toplama: `firmalar_tek_docx`.
 - GUI ayarları artık **sekmeli** (Kriterler / Çıktı / Word Şablon) — büyüyen
   seçenekler kalabalık yapmasın diye. Türkçe casing için `_ascii_kucuk` kullanılır.
 - PDF, GİB şablonuyla birebir değil; **okunur/arşiv** kopyasıdır (resmî dosya

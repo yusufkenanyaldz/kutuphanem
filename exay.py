@@ -877,7 +877,8 @@ def sablon_vkn_metinden(metin):
 
 def sablon_vkn_oku(path):
     """Bir .doc/.docx şablonundan (vkn, unvan) döndürür; okunamaz/eşleşmezse
-    (None, None). Uzantıya göre doğru okuyucuyu seçer."""
+    (None, None). Uzantıya göre doğru okuyucuyu seçer. (Tek firmalık dosyalar için;
+    çok firmalı .docx için _sablon_kayitlari kullanın.)"""
     try:
         if str(path).lower().endswith('.docx'):
             metin = _docx_metni_oku(path)
@@ -886,6 +887,22 @@ def sablon_vkn_oku(path):
         return sablon_vkn_metinden(metin)
     except Exception:
         return (None, None)
+
+def _sablon_kayitlari(path):
+    """Bir şablon dosyasındaki TÜM firma kayıtlarını [(vkn, unvan, blok)] döndürür.
+    Bir .docx dosyası birden çok firma tutanağı içerebilir (her blok ayrı firma;
+    blok = 0-tabanlı indeks). Eski ikili .doc tek firmalıdır (blok=None)."""
+    p = str(path)
+    try:
+        if p.lower().endswith('.docx'):
+            import docx
+            bloklar = _docx_firma_bloklari(docx.Document(p))
+            return [(b['vkn'], b['unvan'], k)
+                    for k, b in enumerate(bloklar) if b['vkn']]
+        vkn, unvan = sablon_vkn_metinden(_doc_metni_oku(p))
+        return [(vkn, unvan, None)] if vkn else []
+    except Exception:
+        return []
 
 def sablonlari_indeksle(klasor, log_cb=None):
     """Verilen klasördeki (alt klasörler dahil) .doc VE .docx şablonlarını karşı
@@ -909,16 +926,21 @@ def sablonlari_indeksle(klasor, log_cb=None):
     if var_docx and not docx_destekli() and log_cb:
         log_cb("  ⚠️  'python-docx' kurulu değil; .docx şablonlar okunamaz "
                "(pip install python-docx).", "warn")
+    coklu = 0
     for p in dosyalar:
         if p.name.startswith('~$'):        # Word geçici dosyaları
             continue
-        vkn, unvan = sablon_vkn_oku(str(p))
-        if not vkn:
-            continue
-        if vkn in idx and log_cb:
-            log_cb(f"  ⚠️  Aynı VKN ({vkn}) için birden çok şablon; sonuncusu "
-                   f"kullanılacak: {p.name}", "warn")
-        idx[vkn] = str(p)
+        kayitlar = _sablon_kayitlari(str(p))
+        if len(kayitlar) > 1:
+            coklu += 1
+        for vkn, unvan, blok in kayitlar:
+            if vkn in idx and log_cb:
+                log_cb(f"  ⚠️  Aynı VKN ({vkn}) için birden çok kayıt; sonuncusu "
+                       f"kullanılacak: {p.name}", "warn")
+            idx[vkn] = (str(p), blok)
+    if coklu and log_cb:
+        log_cb(f"  🧩 {coklu} dosya çok-firmalı (tek Word'de birden çok tutanak) "
+               f"olarak tanındı; her firma ayrı ayrı eşleştirildi.", "info")
     return idx
 
 def word_destekli():
@@ -1160,25 +1182,65 @@ def _docx_inceleme_dayanagi_yaz(doc, metin):
                         return True
     return False
 
-def firma_docx_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=None,
-                       inceleme_dayanagi=None):
-    """Modern .docx şablonunu python-docx ile açar, 'Karşıt İncelemeye Konu
-    Fatura' tablosunun VERİ satırlarını firma faturalarıyla değiştirir ve
-    `cikis_yol`'a yeni .docx olarak kaydeder. Şablon değiştirilmez.
+def _docx_firma_bloklari(doc):
+    """Bir .docx gövdesini firma bloklarına ayırır. Her tutanak bloğu
+    'KATMA DEĞER ... KARŞIT İNCELEME TUTANAĞI' başlık paragrafıyla başlar.
+    [{'ilk':i,'son':j,'vkn':..,'unvan':..,'els':[...]}...] döndürür (els: bloğun
+    gövde elemanları). Başlık yoksa tüm gövde tek blok sayılır (klasik şablon)."""
+    from docx.oxml.ns import qn
+    from docx.text.paragraph import Paragraph
+    from docx.table import Table
+    els = [el for el in doc.element.body if el.tag in (qn('w:p'), qn('w:tbl'))]
+    bas = []
+    for i, el in enumerate(els):
+        if el.tag == qn('w:p'):
+            t = _ascii_kucuk(Paragraph(el, doc).text)
+            if 'katma deger' in t and 'karsit inceleme' in t and 'tutana' in t:
+                bas.append(i)
+    if not bas:
+        bas = [0]
+    bloklar = []
+    for k, bi in enumerate(bas):
+        son = bas[k + 1] if k + 1 < len(bas) else len(els)
+        blok_els = els[bi:son]
+        vkn, unvan = None, None
+        for el in blok_els:
+            if el.tag == qn('w:tbl'):
+                tb = Table(el, doc)
+                metin = '\n'.join('\t'.join(c.text.strip() for c in r.cells)
+                                  for r in tb.rows)
+                if 'nezd' in _ascii_kucuk(metin):
+                    vkn, unvan = sablon_vkn_metinden(metin)
+                    if vkn:
+                        break
+        bloklar.append({'ilk': bi, 'son': son, 'vkn': vkn,
+                        'unvan': unvan, 'els': blok_els})
+    return bloklar
 
-    Word/COM GEREKTİRMEZ (çapraz platform, test edilebilir). python-docx yoksa
-    RuntimeError yükseltir."""
-    try:
-        import docx  # noqa: F401
-        from copy import deepcopy
-    except Exception:
-        raise RuntimeError("python-docx yok (pip install python-docx)")
+def _docx_blok_belgesi(kaynak_yol, blok_index):
+    """Birleşik bir .docx'ten yalnızca `blok_index`. firma bloğunu bırakıp diğer
+    blokların gövde elemanlarını silerek tek-firmalık bir docx.Document döndürür
+    (stiller/bölüm özellikleri korunur)."""
+    import docx
+    from docx.oxml.ns import qn
+    doc = docx.Document(kaynak_yol)
+    bloklar = _docx_firma_bloklari(doc)
+    if not bloklar:
+        return doc
+    if blok_index is None or blok_index >= len(bloklar):
+        blok_index = 0
+    tut = {id(el) for el in bloklar[blok_index]['els']}
+    body = doc.element.body
+    for el in list(body):
+        if el.tag in (qn('w:p'), qn('w:tbl')) and id(el) not in tut:
+            body.remove(el)
+    return doc
 
-    def _yaz(m, t='info'):
-        if log_cb: log_cb(m, t)
-
-    doc = docx.Document(sablon_yol)
-    # Fatura tablosunu başlığından tanı
+def _docx_fatura_doldur(doc, firma_df, tum_kolonlar, inceleme_dayanagi=None, log_cb=None):
+    """Verilen (tek-firmalık) docx belgesindeki fatura tablosunun veri satırlarını
+    firma faturalarıyla doldurur; verilirse İnceleme Dayanağı'nı günceller.
+    Yazılan satır sayısını döndürür."""
+    from copy import deepcopy
     hedef = None
     for tbl in doc.tables:
         basliklar = []
@@ -1190,7 +1252,6 @@ def firma_docx_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
     if hedef is None:
         raise RuntimeError("Şablonda fatura tablosu bulunamadı")
 
-    # Veri başlangıç satırı: baştaki başlık satırlarını atla
     veri_bas = 0
     for i, row in enumerate(hedef.rows):
         txt = _ascii_kucuk(' '.join(c.text for c in row.cells))
@@ -1198,9 +1259,8 @@ def firma_docx_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
             veri_bas = i + 1
         else:
             break
-    veri_bas = max(veri_bas, 1)   # güvence: en az bir başlık satırı korunur
+    veri_bas = max(veri_bas, 1)
 
-    # Biçim klonlamak için ilk veri satırını (varsa) sakla, sonra tüm veri sil
     proto_tr = None
     if len(hedef.rows) > veri_bas:
         proto_tr = deepcopy(hedef.rows[veri_bas]._tr)
@@ -1220,35 +1280,103 @@ def firma_docx_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
                 _docx_hucre_yaz(cell, hucreler[ci])
         yazilan += 1
 
-    # İnceleme Dayanağı (sözleşme tarihi/no) verildiyse değer hücresini güncelle
     if inceleme_dayanagi:
-        if not _docx_inceleme_dayanagi_yaz(doc, inceleme_dayanagi):
-            _yaz("      ⚠️ 'İNCELEME DAYANAĞI' alanı şablonda bulunamadı; sözleşme "
-                 "bilgisi güncellenemedi.", "warn")
+        if not _docx_inceleme_dayanagi_yaz(doc, inceleme_dayanagi) and log_cb:
+            log_cb("      ⚠️ 'İNCELEME DAYANAĞI' alanı şablonda bulunamadı; sözleşme "
+                   "bilgisi güncellenemedi.", "warn")
+    return yazilan
 
+def _firma_docx_hazirla(sablon_yol, firma_df, tum_kolonlar, inceleme_dayanagi=None,
+                        log_cb=None, blok=None):
+    """Şablondan (gerekirse birleşik dosyanın `blok`. bloğunu izole ederek) tek
+    firmalık doldurulmuş docx.Document ile yazılan satır sayısını döndürür.
+    KAYDETMEZ. python-docx yoksa RuntimeError yükseltir."""
+    try:
+        import docx  # noqa: F401
+    except Exception:
+        raise RuntimeError("python-docx yok (pip install python-docx)")
+    if blok is None:
+        doc = docx.Document(sablon_yol)
+    else:
+        doc = _docx_blok_belgesi(sablon_yol, blok)
+    yazilan = _docx_fatura_doldur(doc, firma_df, tum_kolonlar, inceleme_dayanagi, log_cb)
+    return doc, yazilan
+
+def firma_docx_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=None,
+                       inceleme_dayanagi=None, blok=None):
+    """Bir firmanın .docx tutanağını üretip `cikis_yol`'a kaydeder (Word GEREKTİRMEZ).
+    `blok` verilirse birleşik şablon dosyasının o firma bloğu kullanılır."""
+    doc, yazilan = _firma_docx_hazirla(sablon_yol, firma_df, tum_kolonlar,
+                                       inceleme_dayanagi, log_cb, blok=blok)
     os.makedirs(os.path.dirname(os.path.abspath(cikis_yol)), exist_ok=True)
     gercek = _guvenli_docx_kaydet(doc, cikis_yol)
-    _yaz(f"      📝 Word tutanağı: {Path(gercek).name} ({yazilan} fatura satırı)", "ok")
+    if log_cb:
+        log_cb(f"      📝 Word tutanağı: {Path(gercek).name} ({yazilan} fatura satırı)", "ok")
     return gercek
 
-def firma_word_uret(sablon_yol, firma_df, cikis_kl, sira_no, donem, vkn, temiz,
+def _docx_govde_ekle(hedef_doc, kaynak_doc, sayfa_sonu=True):
+    """kaynak_doc'un gövdesini (paragraf + tablolar) hedef_doc'un SONUNA, son
+    bölüm özelliklerinden (sectPr) ÖNCE ekler. sayfa_sonu=True ise araya sayfa
+    sonu koyar. Şablonlar aynı kökten olduğu için stiller uyumludur."""
+    from copy import deepcopy
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    body = hedef_doc.element.body
+    sectPr = body.find(qn('w:sectPr'))
+    def _ekle(el):
+        if sectPr is not None:
+            sectPr.addprevious(el)
+        else:
+            body.append(el)
+    if sayfa_sonu:
+        p = OxmlElement('w:p'); r = OxmlElement('w:r'); br = OxmlElement('w:br')
+        br.set(qn('w:type'), 'page'); r.append(br); p.append(r)
+        _ekle(p)
+    for el in list(kaynak_doc.element.body):
+        if el.tag == qn('w:sectPr'):
+            continue
+        _ekle(deepcopy(el))
+
+def firmalar_tek_docx(bloklar, cikis_yol):
+    """Doldurulmuş firma docx.Document'lerini (bloklar) tek bir .docx'te, her firma
+    yeni sayfada olacak şekilde birleştirip kaydeder. Kaydedilen yolu döndürür."""
+    if not bloklar:
+        return None
+    hedef = bloklar[0]
+    for nd in bloklar[1:]:
+        _docx_govde_ekle(hedef, nd, sayfa_sonu=True)
+    os.makedirs(os.path.dirname(os.path.abspath(cikis_yol)), exist_ok=True)
+    return _guvenli_docx_kaydet(hedef, cikis_yol)
+
+def _sablon_yol_blok(sablon_kaydi):
+    """İndeks değerini (yol, blok) olarak çözer. Geriye dönük uyum için düz yol
+    (str) da kabul edilir → (yol, None)."""
+    if isinstance(sablon_kaydi, (tuple, list)):
+        yol = sablon_kaydi[0]
+        blok = sablon_kaydi[1] if len(sablon_kaydi) > 1 else None
+        return str(yol), blok
+    return str(sablon_kaydi), None
+
+def firma_word_uret(sablon_kaydi, firma_df, cikis_kl, sira_no, donem, vkn, temiz,
                     tum_kolonlar, log_cb=None, inceleme_dayanagi=None):
     """Eşleşen şablondan firma tutanağı üretir; uzantıya göre doğru yöntemi seçer:
       .docx → python-docx (Word gerektirmez),  .doc → Word COM (Windows + Word).
-    Çıktı, şablonla aynı uzantıda `cikis_kl` içine yazılır. `inceleme_dayanagi`
-    verilirse tutanaktaki 'İNCELEME DAYANAĞI' (sözleşme) alanı da güncellenir."""
-    ext = Path(sablon_yol).suffix.lower()
+    `sablon_kaydi` (yol, blok) olabilir: çok-firmalı .docx'te blok o firmanın
+    tutanak sayfasıdır. `inceleme_dayanagi` verilirse sözleşme alanı da güncellenir."""
+    yol, blok = _sablon_yol_blok(sablon_kaydi)
+    ext = Path(yol).suffix.lower()
     ad = f"{sira_no}) {donem.replace('.','_')}_{vkn}_{temiz}{ext}"
     cikis = str(Path(cikis_kl) / ad)
     if ext == '.docx':
-        return firma_docx_olustur(sablon_yol, firma_df, cikis, tum_kolonlar, log_cb,
-                                  inceleme_dayanagi=inceleme_dayanagi)
-    return firma_word_olustur(sablon_yol, firma_df, cikis, tum_kolonlar, log_cb,
+        return firma_docx_olustur(yol, firma_df, cikis, tum_kolonlar, log_cb,
+                                  inceleme_dayanagi=inceleme_dayanagi, blok=blok)
+    return firma_word_olustur(yol, firma_df, cikis, tum_kolonlar, log_cb,
                               inceleme_dayanagi=inceleme_dayanagi)
 
-def sablon_uretilebilir_mi(sablon_yol):
+def sablon_uretilebilir_mi(sablon_kaydi):
     """Bu şablon türü için üretim yapılabilir mi? (.docx→python-docx, .doc→Word COM)"""
-    if str(sablon_yol).lower().endswith('.docx'):
+    yol, _ = _sablon_yol_blok(sablon_kaydi)
+    if yol.lower().endswith('.docx'):
         return docx_destekli()
     return word_destekli()
 
@@ -1440,8 +1568,10 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                 log_cb(f"  🗓 İnceleme Dayanağı her Word tutanağına yazılacak: "
                        f"\"{inceleme_dayanagi}\"", "info")
             # Şablon uzantılarına göre üretim ön koşulunu kontrol et
-            idx_docx = any(v.lower().endswith('.docx') for v in sablon_index.values())
-            idx_doc  = any(v.lower().endswith('.doc') for v in sablon_index.values())
+            idx_docx = any(_sablon_yol_blok(v)[0].lower().endswith('.docx')
+                           for v in sablon_index.values())
+            idx_doc  = any(_sablon_yol_blok(v)[0].lower().endswith('.doc')
+                           for v in sablon_index.values())
             if idx_docx and not docx_destekli():
                 log_cb("  ⚠️  .docx şablonlar için 'python-docx' gerekli; kurulu "
                        "değil (pip install python-docx). Bu şablonlar üretilemez.", "warn")
