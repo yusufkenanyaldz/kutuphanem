@@ -1073,6 +1073,23 @@ def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
         except Exception:
             pass
 
+def _guvenli_docx_kaydet(doc, tam_yol):
+    """.docx'i kaydeder; Windows uzun yol/uzun dosya adı sorununda adı kısaltarak
+    yeniden dener (guvenli_kaydet'in .docx karşılığı). Kaydedilen gerçek yolu döndürür."""
+    yol = Path(tam_yol); klasor = yol.parent; stem = yol.stem
+    try:
+        doc.save(str(yol)); return str(yol)
+    except Exception:
+        pass
+    for uzunluk in (80, 60, 40, 25, 15):
+        try:
+            kisa = stem[:uzunluk].rstrip(' ._-')
+            yeni = klasor / f"{kisa}.docx"
+            doc.save(str(yeni)); return str(yeni)
+        except Exception:
+            continue
+    doc.save(str(yol)); return str(yol)   # son deneme (hatayı çağırana bildirir)
+
 def _docx_hucre_yaz(cell, metin):
     """Hücreye metni yazar; mevcut paragraf biçimini (hizalama/stil) ve varsa ilk
     run'ın font biçimini KORUYARAK. Böylece şablonun hücre düzeni (ör. ortalı/sağa
@@ -1126,6 +1143,7 @@ def firma_docx_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
             veri_bas = i + 1
         else:
             break
+    veri_bas = max(veri_bas, 1)   # güvence: en az bir başlık satırı korunur
 
     # Biçim klonlamak için ilk veri satırını (varsa) sakla, sonra tüm veri sil
     proto_tr = None
@@ -1148,9 +1166,9 @@ def firma_docx_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
         yazilan += 1
 
     os.makedirs(os.path.dirname(os.path.abspath(cikis_yol)), exist_ok=True)
-    doc.save(cikis_yol)
-    _yaz(f"      📝 Word tutanağı: {Path(cikis_yol).name} ({yazilan} fatura satırı)", "ok")
-    return cikis_yol
+    gercek = _guvenli_docx_kaydet(doc, cikis_yol)
+    _yaz(f"      📝 Word tutanağı: {Path(gercek).name} ({yazilan} fatura satırı)", "ok")
+    return gercek
 
 def firma_word_uret(sablon_yol, firma_df, cikis_kl, sira_no, donem, vkn, temiz,
                     tum_kolonlar, log_cb=None):
