@@ -947,50 +947,79 @@ def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
         word.DisplayAlerts = 0
     except Exception:
         pass
+    # Bir hücrenin temiz metni (hücre/paragraf işaretleri atılır). Word COM'da
+    # birleşik (merged) hücreli tablolarda Columns.Count hata verebildiği için,
+    # her yerde satırın kendi Cells koleksiyonu üzerinden gidilir.
+    def _hucre(cell):
+        try:
+            return re.sub(r'[\r\x07\x02\n]', '', cell.Range.Text).strip()
+        except Exception:
+            return ''
+    def _satir_metni(tbl, r):
+        try:
+            return ' '.join(_hucre(c) for c in tbl.Rows(r).Cells)
+        except Exception:
+            return ''
+
     doc = None
     try:
         doc = word.Documents.Open(os.path.abspath(sablon_yol), ReadOnly=False)
         hedef_tablo = None
-        veri_bas = 2   # varsayılan: ilk 2 satır başlık (FATURANIN/MALIN + alt başlıklar)
+        veri_bas = 2
         for tbl in doc.Tables:
             try:
-                sut_say = tbl.Columns.Count
+                rmax = tbl.Rows.Count
             except Exception:
-                sut_say = 0
-            # İlk iki satırın hücre metinlerini topla
+                continue
+            # İlk (en çok) iki satırın metnini başlık adayı olarak topla
             basliklar = []
-            try:
-                for r in range(1, min(2, tbl.Rows.Count) + 1):
-                    for cc in range(1, sut_say + 1):
-                        try:
-                            txt = tbl.Cell(r, cc).Range.Text
-                            basliklar.append(re.sub(r'[\r\x07]', '', txt).strip())
-                        except Exception:
-                            pass
-            except Exception:
-                pass
-            if _fatura_tablosu_mu(basliklar):
-                hedef_tablo = tbl
-                # Alt başlık satırı "Tarihi/Numarası" ikinci satırdaysa veri 3. satırdan başlar
-                ikinci = ' '.join(basliklar).lower()
-                veri_bas = 3 if ('tarihi' in ikinci and 'numar' in ikinci) else 2
-                break
+            for r in range(1, min(2, rmax) + 1):
+                try:
+                    basliklar.extend(_hucre(c) for c in tbl.Rows(r).Cells)
+                except Exception:
+                    pass
+            if not _fatura_tablosu_mu(basliklar):
+                continue
+            hedef_tablo = tbl
+            # Veri başlangıcı: baştan başlık gibi görünen satırları (FATURANIN,
+            # MALIN, Tarihi, Numarası, Cinsi, Miktarı, Tutarı, KDV, Defter...)
+            # atla; ilk veri satırında dur.
+            BAS_KELIME = ('faturanın', 'malin', 'malın', 'tarihi', 'numar', 'cinsi',
+                          'miktar', 'tutar', 'kdv', 'defter', 'nosu', 'belge')
+            veri_bas = 1
+            for r in range(1, rmax + 1):
+                txt = _satir_metni(tbl, r).lower()
+                if txt and any(k in txt for k in BAS_KELIME):
+                    veri_bas = r + 1
+                else:
+                    break
+            break
         if hedef_tablo is None:
             raise RuntimeError("Şablonda fatura tablosu bulunamadı")
 
+        _yaz(f"      🧩 Fatura tablosu bulundu (veri {veri_bas}. satırdan başlıyor).", "info")
+
         # Mevcut veri satırlarını sil (baştaki başlık satırları korunur)
         while hedef_tablo.Rows.Count >= veri_bas:
-            hedef_tablo.Rows(hedef_tablo.Rows.Count).Delete()
+            try:
+                hedef_tablo.Rows(hedef_tablo.Rows.Count).Delete()
+            except Exception:
+                break
 
-        sut_say = hedef_tablo.Columns.Count
         yazilan = 0
         for _, row in firma_df.iterrows():
             hucreler = _word_fatura_satiri(row, tum_kolonlar)
             yeni = hedef_tablo.Rows.Add()
-            for ci in range(1, sut_say + 1):
+            try:
+                cells = yeni.Cells
+                n = cells.Count
+            except Exception:
+                n = len(hucreler)
+                cells = None
+            for ci in range(1, n + 1):
                 if ci - 1 < len(hucreler):
                     try:
-                        yeni.Cells(ci).Range.Text = hucreler[ci - 1]
+                        (cells(ci) if cells else yeni.Cells(ci)).Range.Text = hucreler[ci - 1]
                     except Exception:
                         pass
             yazilan += 1

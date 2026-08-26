@@ -566,3 +566,28 @@ def test_dosyalari_isle_sablon_eslesme_raporu(tmp_path, monkeypatch):
     assert "1000000001" in satirlar             # A eşleşti
     assert "1000000002" in satirlar             # B şablonsuz
     assert satirlar["1000000002"] == "Şablon yok"
+
+
+def test_gercek_gib_basliklari_word_eslemesi():
+    """Gerçek 'Yeni GİB' başlık düzeni (uzun sütun adları, kesme işaretli KDV'si,
+    birleşik VKN/TC sütunu, 'Alınan Mal ve/veya Hizmetin Miktarı') doğru eşlenmeli
+    ve Word satırı [Tarih,No,Cinsi,Miktar,Tutar,KDV,''] üretmeli."""
+    kols = [
+        "Alış Faturasının Tarihi", "Alış Faturasının Serisi",
+        "Alış Faturasının Sıra No'su", "Satıcının Adı-Soyadı / Ünvanı",
+        "Satıcının Vergi Kimlik Numarası / TC Kimlik Numarası",
+        "Alınan Mal ve/veya Hizmetin Cinsi", "Alınan Mal ve/veya Hizmetin Miktarı",
+        "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı", "KDV'si",
+        "Toplam İndirilecek KDV Tutarı",
+    ]
+    df = pd.DataFrame([[
+        "2026-07-25", None, "0012026165876119", "TURKCELL ILETİSİM HİZMETLERİ A.S.",
+        "8770013456", "İLETİŞİM HİZMET BEDELİ", "5 ADET", 1208.34, 241.67, 241.67,
+    ]], columns=kols)
+    b = exay.bulunan_sutunlar(df)
+    assert b["Matrah"] == "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı"
+    assert b["KDV"] == "KDV'si"                          # kesme işaretli, toplam KDV ile karışmaz
+    assert exay.sutun_bul(kols, ["miktar"]) == "Alınan Mal ve/veya Hizmetin Miktarı"
+    satir = exay._word_fatura_satiri(df.iloc[0], kols)
+    assert satir == ["25.07.2026", "0012026165876119", "İLETİŞİM HİZMET BEDELİ",
+                     "5 ADET", "1.208,34", "241,67", ""]
