@@ -500,8 +500,8 @@ def test_sablonlari_indeksle(tmp_path, monkeypatch):
             metinler[str(p)] = "Sayı: YMM 123 üst yazı"
     monkeypatch.setattr(exay, "_doc_metni_oku", lambda p: metinler[str(p)])
     idx = exay.sablonlari_indeksle(str(tmp_path))
-    assert idx["1234567890"].endswith("a.doc")
-    assert idx["9876543210"].endswith("b.doc")
+    assert idx["1234567890"][0].endswith("a.doc")
+    assert idx["9876543210"][0].endswith("b.doc")
     assert len(idx) == 2               # üst yazı eşleşmez
 
 
@@ -650,7 +650,7 @@ def test_docx_sablon_vkn_oku(tmp_path):
 def test_sablonlari_indeksle_docx_dahil(tmp_path):
     _docx_sablon_yaz(tmp_path / "a.docx", "FIRMA A", "V.D. 1234567890")
     idx = exay.sablonlari_indeksle(str(tmp_path))
-    assert idx.get("1234567890", "").endswith("a.docx")   # .docx da indekslenir
+    assert idx["1234567890"][0].endswith("a.docx")   # .docx da indekslenir
 
 
 def test_firma_docx_olustur_tabloyu_doldurur(tmp_path):
@@ -770,3 +770,81 @@ def test_inceleme_dayanagi_docx_gunceller(tmp_path):
                 assert 'inceleme dayana' in exay._ascii_kucuk(cs[0].text)  # etiket sabit
                 bulundu = True
     assert bulundu
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Çok-firmalı tek .docx: içinden ilgili firmayı VKN ile bulup izole etme
+# ══════════════════════════════════════════════════════════════════════════
+def _docx_coklu_yaz(yol, firmalar):
+    """Tek dosyada birden çok firma tutanağı üretir; her blok
+    'KATMA DEĞER ... KARŞIT İNCELEME TUTANAĞI' başlığıyla başlar (gerçek yapı)."""
+    import docx
+    d = docx.Document()
+    for k, (unvan, vd) in enumerate(firmalar):
+        if k > 0:
+            d.add_page_break()
+        d.add_paragraph("KATMA DEĞER VERGİSİ İADESİ KARŞIT İNCELEME TUTANAĞI")
+        t0 = d.add_table(rows=0, cols=2)
+        for e, v in [("NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN", e := "NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN"),
+                     ("Ünvanı", unvan), ("Vergi Dairesi/Nosu", vd),
+                     ("İNCELEME DAYANAĞI", "31.01.2026 Tarih ve 09 Sayılı")]:
+            r = t0.add_row().cells; r[0].text = e if isinstance(e, str) else e; r[1].text = v
+        d.add_paragraph("Karşıt İncelemeye Konu Fatura ve Benzeri Belgeye ilişkin bilgiler:")
+        t2 = d.add_table(rows=3, cols=7)
+        for c, v in enumerate(["FATURANIN", "FATURANIN", "MALIN", "MALIN", "MALIN", "MALIN", "Defter Kayıt"]):
+            t2.rows[0].cells[c].text = v
+        for c, v in enumerate(["Tarihi", "Numarası", "Cinsi", "Miktarı", "Tutarı", "KDV Tutarı", "Tarihi/Nosu"]):
+            t2.rows[1].cells[c].text = v
+    d.save(yol)
+
+
+def test_docx_coklu_firma_kayitlari(tmp_path):
+    yol = tmp_path / "hepsi.docx"
+    _docx_coklu_yaz(yol, [("FIRMA A", "V.D. 1234567890"),
+                          ("FIRMA B", "V.D. 9876543210")])
+    kayit = exay._sablon_kayitlari(str(yol))
+    vknler = {v: b for v, u, b in kayit}
+    assert vknler == {"1234567890": 0, "9876543210": 1}   # iki firma, blok 0/1
+    idx = exay.sablonlari_indeksle(str(tmp_path))
+    assert idx["1234567890"] == (str(yol), 0)
+    assert idx["9876543210"] == (str(yol), 1)
+
+
+def test_docx_blok_izole_ve_doldur(tmp_path):
+    import docx
+    yol = tmp_path / "hepsi.docx"
+    _docx_coklu_yaz(yol, [("FIRMA A", "V.D. 1234567890"),
+                          ("FIRMA B", "V.D. 9876543210")])
+    kols = ["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su",
+            "Alınan Mal ve/veya Hizmetin Cinsi", "Alınan Mal ve/veya Hizmetin Miktarı",
+            "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı", "KDV'si"]
+    firma = pd.DataFrame([["2026-07-02", "B1", "MAL", "5 ADET", 2000.0, 360.0]], columns=kols)
+    cikti = tmp_path / "b.docx"
+    # blok 1 = FIRMA B izole edilmeli
+    exay.firma_docx_olustur(str(yol), firma, str(cikti), kols, blok=1)
+    d = docx.Document(str(cikti))
+    # Tek firma → sadece B'nin bloğu (1 fatura tablosu) kalmalı
+    fat = [t for t in d.tables if len(t.columns) == 7]
+    assert len(fat) == 1
+    # içindeki firma B olmalı (A değil)
+    metin = "\n".join("\t".join(c.text.strip() for c in r.cells)
+                      for t in d.tables for r in t.rows)
+    vkn, _ = exay.sablon_vkn_metinden(metin)
+    assert vkn == "9876543210"
+    # fatura satırı dolduruldu
+    veri = [c.text.strip() for c in fat[0].rows[2].cells]
+    assert veri[1] == "B1" and veri[3] == "5 ADET"
+
+
+def test_docx_coklu_uctan_uca(tmp_path):
+    """Liste + çok-firmalı tek şablon dosyası → her firma ayrı tutanak."""
+    yol = tmp_path / "NISAN_2026.xlsx"
+    _yeni_gib_yaz(yol)     # FIRMA A=1000000001, FIRMA B=1000000002 seçilir
+    sk = tmp_path / "sablonlar"; sk.mkdir()
+    _docx_coklu_yaz(sk / "hepsi.docx", [("FIRMA A", "V.D. 1000000001"),
+                                        ("FIRMA B", "V.D. 1000000002")])
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        sablon_klasor=str(sk), cikti_turu='word')
+    uretilen = sorted(p.name for p in (tmp_path / "Hazır Tutanaklar").glob("*.docx"))
+    assert any("1000000001" in n for n in uretilen)   # A tek dosyadan bulundu
+    assert any("1000000002" in n for n in uretilen)   # B tek dosyadan bulundu
