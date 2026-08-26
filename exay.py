@@ -815,6 +815,27 @@ def _doc_metni_oku(path):
     t = data.decode('utf-16-le', 'ignore').replace('\r', '\n').replace('\x07', '\t')
     return re.sub(r'[\x00-\x06\x08\x0b\x0c\x0e-\x1f]', '', t)
 
+def _docx_metni_oku(path):
+    """Modern .docx dosyasının metnini çıkarır (paragraflar + tablo hücreleri).
+    Her tablo satırının hücreleri sekme ile birleştirilir; böylece
+    sablon_vkn_metinden'in etiket→değer (Ünvanı \\t X) örüntüsü .docx'te de
+    çalışır. `python-docx` gerekir (yalnızca okuma)."""
+    import docx
+    doc = docx.Document(path)
+    parcalar = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    for tbl in doc.tables:
+        for row in tbl.rows:
+            parcalar.append('\t'.join(c.text.strip() for c in row.cells))
+    return '\n'.join(parcalar)
+
+def docx_destekli():
+    """python-docx kullanılabilir mi? (.docx şablon okuma/yazma için)"""
+    try:
+        import docx  # noqa: F401
+        return True
+    except Exception:
+        return False
+
 def _vkn_metinden_ayikla(s):
     """Bir metin parçasından geçerli VKN/TCKN (10-11 hane) çıkarır; yoksa None.
     Aradaki boşlukları temizler (ör. '493 061 9102' → '4930619102'), 8-9 haneyi
@@ -847,28 +868,40 @@ def sablon_vkn_metinden(metin):
     return (vkn, unvan)
 
 def sablon_vkn_oku(path):
-    """Bir .doc şablonundan (vkn, unvan) döndürür; okunamaz/eşleşmezse (None, None)."""
+    """Bir .doc/.docx şablonundan (vkn, unvan) döndürür; okunamaz/eşleşmezse
+    (None, None). Uzantıya göre doğru okuyucuyu seçer."""
     try:
-        return sablon_vkn_metinden(_doc_metni_oku(path))
+        if str(path).lower().endswith('.docx'):
+            metin = _docx_metni_oku(path)
+        else:
+            metin = _doc_metni_oku(path)
+        return sablon_vkn_metinden(metin)
     except Exception:
         return (None, None)
 
 def sablonlari_indeksle(klasor, log_cb=None):
-    """Verilen klasördeki (alt klasörler dahil) .doc şablonlarını karşı firma
-    VKN'sine göre indeksler → {vkn: dosya_yolu}. Aynı VKN birden çok şablonda
-    varsa sonuncusu kullanılır ve uyarılır. Klasör yoksa boş sözlük döner."""
+    """Verilen klasördeki (alt klasörler dahil) .doc VE .docx şablonlarını karşı
+    firma VKN'sine göre indeksler → {vkn: dosya_yolu}. Aynı VKN birden çok
+    şablonda varsa sonuncusu kullanılır ve uyarılır. Klasör yoksa boş sözlük."""
     idx = {}
     kok = Path(klasor) if klasor else None
     if not kok or not kok.exists():
         return idx
-    try:
-        import olefile  # noqa: F401
-    except Exception:
-        if log_cb:
-            log_cb("  ⚠️  'olefile' kurulu değil; .doc şablonlar okunamaz "
-                   "(pip install olefile).", "warn")
-        return idx
-    for p in sorted(kok.rglob('*.doc')):
+    dosyalar = sorted(list(kok.rglob('*.doc')) + list(kok.rglob('*.docx')))
+    var_doc  = any(p.suffix.lower() == '.doc' for p in dosyalar)
+    var_docx = any(p.suffix.lower() == '.docx' for p in dosyalar)
+    # Okuma için gereken kütüphaneler yoksa net uyar
+    if var_doc:
+        try:
+            import olefile  # noqa: F401
+        except Exception:
+            if log_cb:
+                log_cb("  ⚠️  'olefile' kurulu değil; .doc şablonlar okunamaz "
+                       "(pip install olefile).", "warn")
+    if var_docx and not docx_destekli() and log_cb:
+        log_cb("  ⚠️  'python-docx' kurulu değil; .docx şablonlar okunamaz "
+               "(pip install python-docx).", "warn")
+    for p in dosyalar:
         if p.name.startswith('~$'):        # Word geçici dosyaları
             continue
         vkn, unvan = sablon_vkn_oku(str(p))
@@ -1040,6 +1073,89 @@ def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
         except Exception:
             pass
 
+def firma_docx_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=None):
+    """Modern .docx şablonunu python-docx ile açar, 'Karşıt İncelemeye Konu
+    Fatura' tablosunun VERİ satırlarını firma faturalarıyla değiştirir ve
+    `cikis_yol`'a yeni .docx olarak kaydeder. Şablon değiştirilmez.
+
+    Word/COM GEREKTİRMEZ (çapraz platform, test edilebilir). python-docx yoksa
+    RuntimeError yükseltir."""
+    try:
+        import docx  # noqa: F401
+        from copy import deepcopy
+    except Exception:
+        raise RuntimeError("python-docx yok (pip install python-docx)")
+
+    def _yaz(m, t='info'):
+        if log_cb: log_cb(m, t)
+
+    doc = docx.Document(sablon_yol)
+    # Fatura tablosunu başlığından tanı
+    hedef = None
+    for tbl in doc.tables:
+        basliklar = []
+        for row in tbl.rows[:2]:
+            basliklar.extend(c.text.strip() for c in row.cells)
+        if _fatura_tablosu_mu(basliklar):
+            hedef = tbl
+            break
+    if hedef is None:
+        raise RuntimeError("Şablonda fatura tablosu bulunamadı")
+
+    # Veri başlangıç satırı: baştaki başlık satırlarını atla
+    BAS_KELIME = ('faturanın', 'malin', 'malın', 'tarihi', 'numar', 'cinsi',
+                  'miktar', 'tutar', 'kdv', 'defter', 'nosu', 'belge')
+    veri_bas = 0
+    for i, row in enumerate(hedef.rows):
+        txt = ' '.join(c.text for c in row.cells).strip().lower()
+        if txt and any(k in txt for k in BAS_KELIME):
+            veri_bas = i + 1
+        else:
+            break
+
+    # Biçim klonlamak için ilk veri satırını (varsa) sakla, sonra tüm veri sil
+    proto_tr = None
+    if len(hedef.rows) > veri_bas:
+        proto_tr = deepcopy(hedef.rows[veri_bas]._tr)
+    for row in list(hedef.rows)[veri_bas:]:
+        hedef._tbl.remove(row._tr)
+
+    yazilan = 0
+    for _, r in firma_df.iterrows():
+        hucreler = _word_fatura_satiri(r, tum_kolonlar)
+        if proto_tr is not None:
+            hedef._tbl.append(deepcopy(proto_tr))
+            satir = hedef.rows[-1]
+        else:
+            satir = hedef.add_row()
+        for ci, cell in enumerate(satir.cells):
+            if ci < len(hucreler):
+                cell.text = hucreler[ci]
+        yazilan += 1
+
+    os.makedirs(os.path.dirname(os.path.abspath(cikis_yol)), exist_ok=True)
+    doc.save(cikis_yol)
+    _yaz(f"      📝 Word tutanağı: {Path(cikis_yol).name} ({yazilan} fatura satırı)", "ok")
+    return cikis_yol
+
+def firma_word_uret(sablon_yol, firma_df, cikis_kl, sira_no, donem, vkn, temiz,
+                    tum_kolonlar, log_cb=None):
+    """Eşleşen şablondan firma tutanağı üretir; uzantıya göre doğru yöntemi seçer:
+      .docx → python-docx (Word gerektirmez),  .doc → Word COM (Windows + Word).
+    Çıktı, şablonla aynı uzantıda `cikis_kl` içine yazılır."""
+    ext = Path(sablon_yol).suffix.lower()
+    ad = f"{sira_no}) {donem.replace('.','_')}_{vkn}_{temiz}{ext}"
+    cikis = str(Path(cikis_kl) / ad)
+    if ext == '.docx':
+        return firma_docx_olustur(sablon_yol, firma_df, cikis, tum_kolonlar, log_cb)
+    return firma_word_olustur(sablon_yol, firma_df, cikis, tum_kolonlar, log_cb)
+
+def sablon_uretilebilir_mi(sablon_yol):
+    """Bu şablon türü için üretim yapılabilir mi? (.docx→python-docx, .doc→Word COM)"""
+    if str(sablon_yol).lower().endswith('.docx'):
+        return docx_destekli()
+    return word_destekli()
+
 # ══════════════════════════════════════════
 #  ÖZET RAPOR
 # ══════════════════════════════════════════
@@ -1205,7 +1321,6 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
 
         # ── Word şablonları: klasör verildiyse VKN'ye göre indeksle ──
         sablon_index = {}
-        word_com = False
         if sablon_klasor:
             log_cb(f"🗂  Word şablonları taranıyor: {sablon_klasor}", "info")
             try:
@@ -1213,11 +1328,16 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
             except Exception as e:
                 log_cb(f"  ⚠️ Şablon klasörü okunamadı: {e}", "warn")
             log_cb(f"  {len(sablon_index)} şablon VKN ile indekslendi.", "ok")
-            word_com = word_destekli()
-            if not word_com:
-                log_cb("  ⚠️  Word otomasyonu yok (pywin32 + Windows Word gerekli). "
-                       "Word tutanakları üretilmeyecek; yalnızca eşleşme raporu "
-                       "çıkarılacak.", "warn")
+            # Şablon uzantılarına göre üretim ön koşulunu kontrol et
+            idx_docx = any(v.lower().endswith('.docx') for v in sablon_index.values())
+            idx_doc  = any(v.lower().endswith('.doc') for v in sablon_index.values())
+            if idx_docx and not docx_destekli():
+                log_cb("  ⚠️  .docx şablonlar için 'python-docx' gerekli; kurulu "
+                       "değil (pip install python-docx). Bu şablonlar üretilemez.", "warn")
+            if idx_doc and not word_destekli():
+                log_cb("  ⚠️  .doc şablonlar için Word otomasyonu (pywin32 + Windows "
+                       "Word) gerekli; yok. Bu şablonlar üretilemez. (.docx şablonlar "
+                       "Word'süz üretilebilir.)", "warn")
         word_eslesen = []     # (vkn, unvan) — şablonu bulunan firmalar
         word_uretilen = []    # vkn — Word tutanağı gerçekten üretilen firmalar
         word_sablonsuz = []   # (vkn, unvan) — seçilmiş ama şablonu olmayan firmalar
@@ -1257,16 +1377,16 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                                           vkn=vkn, unvan=unvan, donem=donem)
                     except Exception as pe:
                         log_cb(f"      ⚠️ PDF üretilemedi ({vkn}): {pe}", "warn")
-                # Word şablon eşleştirme (VKN ile) — opsiyonel, Excel'i etkilemez
+                # Word şablon eşleştirme (VKN ile) — opsiyonel, Excel'i etkilemez.
+                # .docx şablonlar Word'süz (python-docx), .doc şablonlar Word COM ile.
                 if sablon_klasor:
                     sy = sablon_index.get(vkn)
                     if sy:
                         word_eslesen.append((vkn, unvan))
-                        if word_com:
+                        if sablon_uretilebilir_mi(sy):
                             try:
-                                w_ad = f"{sira_no}) {donem.replace('.','_')}_{vkn}_{temiz}.doc"
-                                firma_word_olustur(sy, grp, str(cikis_kl / w_ad),
-                                                   list(df.columns), log_cb)
+                                firma_word_uret(sy, grp, cikis_kl, sira_no, donem,
+                                                vkn, temiz, list(df.columns), log_cb)
                                 word_uretilen.append(vkn)
                             except Exception as we:
                                 log_cb(f"      ⚠️ Word tutanağı üretilemedi ({vkn}): {we}", "warn")
@@ -1285,10 +1405,10 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
 
         # ── Word şablon eşleşme özeti + raporu ──
         if sablon_klasor:
-            log_cb(f"🗂  Şablon eşleşmesi: {len(word_eslesen)} firma eşleşti"
-                   + (f", {len(word_uretilen)} Word tutanağı üretildi"
-                      if word_com else " (Word yok → üretilmedi)")
-                   + f"; {len(word_sablonsuz)} firmanın şablonu yok.", "ok")
+            log_cb(f"🗂  Şablon eşleşmesi: {len(word_eslesen)} firma eşleşti, "
+                   f"{len(word_uretilen)} Word tutanağı üretildi"
+                   + (f"; {len(word_sablonsuz)} firmanın şablonu yok."
+                      if word_sablonsuz else "."), "ok")
             if word_sablonsuz:
                 for v, uv in word_sablonsuz[:15]:
                     log_cb(f"   • Şablon yok: {v:15} {uv[:35]}", "warn")
