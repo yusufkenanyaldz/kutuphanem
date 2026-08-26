@@ -1667,8 +1667,10 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
 # ══════════════════════════════════════════
 #  GUI
 # ══════════════════════════════════════════
-APP="#F5F6FA"; KART="#FFFFFF"; KOYU="#1A1A2E"
-KIRMIZI="#E63946"; GRI="#6B7280"; TURUNCU="#F4A261"
+APP="#EEF1F7"; KART="#FFFFFF"; KOYU="#1F2937"
+KIRMIZI="#E63946"; GRI="#6B7280"; TURUNCU="#F59E0B"
+ACCENT="#4F46E5"; ACCENT2="#4338CA"; KENAR="#E3E7EF"; BASLIK_BG="#1E293B"
+YESIL="#16A34A"; LOG_BG="#0F172A"
 F_ANA=('Segoe UI',10); F_BLK=('Segoe UI',10,'bold')
 F_KUC=('Segoe UI',9);  F_BAS=('Segoe UI',13,'bold')
 F_CON=('Consolas',9)
@@ -1734,30 +1736,67 @@ class KDVBolmeApp:
         except Exception:
             pass
 
+    def _stil_kur(self):
+        """ttk temasını 'clam'a alıp düz/modern bir görünüm için renkleri ayarlar."""
+        try:
+            st = ttk.Style()
+            try: st.theme_use('clam')
+            except Exception: pass
+            st.configure("TNotebook", background=APP, borderwidth=0, tabmargins=(2,4,2,0))
+            st.configure("TNotebook.Tab", background="#DDE3EE", foreground=GRI,
+                         font=('Segoe UI',9,'bold'), padding=(16,8), borderwidth=0)
+            st.map("TNotebook.Tab",
+                   background=[('selected', APP)],
+                   foreground=[('selected', ACCENT)])
+            st.configure("TEntry", fieldbackground=KART, background=KART,
+                         bordercolor=KENAR, lightcolor=KENAR, darkcolor=KENAR,
+                         relief='flat', padding=5)
+            st.configure("Ymm.Horizontal.TProgressbar",
+                         troughcolor=KENAR, background=ACCENT, borderwidth=0, thickness=8)
+            st.configure("Vertical.TScrollbar", background="#CBD5E1",
+                         troughcolor=LOG_BG, borderwidth=0, arrowcolor=GRI)
+        except Exception:
+            pass
+
+    def _buton(self, parent, text, cmd, tur='ikincil'):
+        """Düz (flat), hover'lı bir düğme döndürür. tur='ana' → vurgu renkli."""
+        if tur == 'ana':
+            bg, fg, hov = ACCENT, 'white', ACCENT2
+        else:
+            bg, fg, hov = KART, KOYU, '#EAEEF6'
+        b = tk.Button(parent, text=text, command=cmd, font=('Segoe UI',9),
+                      bg=bg, fg=fg, activebackground=hov, activeforeground=fg,
+                      relief='flat', bd=0, padx=12, pady=6, cursor='hand2',
+                      highlightbackground=KENAR, highlightthickness=1)
+        b.bind('<Enter>', lambda e: b.config(bg=hov))
+        b.bind('<Leave>', lambda e: b.config(bg=bg))
+        return b
+
     def _ui(self):
-        # ── Sol panel ──
-        sol = tk.Frame(self.root, bg=APP, width=310)
-        sol.pack(side='left', fill='y', padx=(18,8), pady=18)
+        self._stil_kur()
+
+        # ── Üst başlık şeridi ──
+        hdr = tk.Frame(self.root, bg=BASLIK_BG, height=62)
+        hdr.pack(side='top', fill='x'); hdr.pack_propagate(False)
+        mono = tk.Canvas(hdr, width=40, height=40, bg=BASLIK_BG, highlightthickness=0)
+        mono.create_oval(3, 3, 37, 37, fill=ACCENT, outline='')
+        mono.create_text(20, 20, text="Y", fill='white', font=('Segoe UI',16,'bold'))
+        mono.pack(side='left', padx=(18,12), pady=11)
+        bsol = tk.Frame(hdr, bg=BASLIK_BG); bsol.pack(side='left', pady=(12,0), anchor='w')
+        tk.Label(bsol, text="Karşıt İnceleme Asistanı", bg=BASLIK_BG, fg='white',
+                 font=('Segoe UI',14,'bold')).pack(anchor='w')
+        tk.Label(bsol, text=f"e-YMM  ·  Sürüm {SURUM}", bg=BASLIK_BG, fg='#94A3B8',
+                 font=('Segoe UI',8)).pack(anchor='w')
+
+        # ── Sol panel (ayarlar) ──
+        sol = tk.Frame(self.root, bg=APP, width=344)
+        sol.pack(side='left', fill='y', padx=(14,8), pady=14)
         sol.pack_propagate(False)
         self.sol = sol
 
-        self._logo_yukle()
-
-        tk.Label(sol, text="Karşıt İnceleme Hazırlayıcı",
-                 font=F_BAS, bg=APP, fg=KOYU,
-                 wraplength=310, justify='center').pack(pady=(6,0))
-        tk.Label(sol, text=f"e-YMM  •  v{SURUM}",
-                 font=('Segoe UI',8), bg=APP, fg=GRI).pack(pady=(0,10))
-
         # ── Ayar sekmeleri (Kriterler / Çıktı / Word Şablon) ──
-        try:
-            _st = ttk.Style()
-            _st.configure("Ymm.TNotebook", background=APP, borderwidth=0)
-            _st.configure("Ymm.TNotebook.Tab", font=('Segoe UI',9,'bold'), padding=(12,5))
-        except Exception:
-            pass
-        nb = ttk.Notebook(sol, style="Ymm.TNotebook")
-        nb.pack(fill='x', pady=(0,10))
+        nb = ttk.Notebook(sol)
+        nb.pack(fill='x', pady=(0,12))
 
         # — Sekme 1: Kriterler —
         t1 = tk.Frame(nb, bg=APP, padx=10, pady=10); nb.add(t1, text="Kriterler")
@@ -1783,12 +1822,10 @@ class KDVBolmeApp:
                        font=F_KUC, bg=APP, fg=KOYU, activebackground=APP,
                        anchor='w', command=self._ayar_kaydet).pack(fill='x', pady=(0,6))
         cf = tk.Frame(t2, bg=APP); cf.pack(fill='x')
-        tk.Button(cf, text="Çıktı klasörü…", font=('Segoe UI',8),
-                  bg=KART, fg=KOYU, relief='solid', bd=1,
-                  command=self._cikis_klasoru_sec).pack(side='left')
+        self._buton(cf, "Çıktı klasörü…", self._cikis_klasoru_sec).pack(side='left')
         self.cikis_lbl = tk.Label(cf, text=self._cikis_ozet(), font=('Segoe UI',8),
                                   bg=APP, fg=GRI, anchor='w')
-        self.cikis_lbl.pack(side='left', padx=(6,0), fill='x', expand=True)
+        self.cikis_lbl.pack(side='left', padx=(8,0), fill='x', expand=True)
 
         # — Sekme 3: Word Şablon —
         t3 = tk.Frame(nb, bg=APP, padx=10, pady=10); nb.add(t3, text="Word Şablon")
@@ -1796,12 +1833,10 @@ class KDVBolmeApp:
                  font=F_KUC, bg=APP, fg=KOYU, anchor='w',
                  wraplength=300, justify='left').pack(fill='x')
         wf = tk.Frame(t3, bg=APP); wf.pack(fill='x', pady=(2,8))
-        tk.Button(wf, text="Şablon klasörü…", font=('Segoe UI',8),
-                  bg=KART, fg=KOYU, relief='solid', bd=1,
-                  command=self._sablon_klasoru_sec).pack(side='left')
+        self._buton(wf, "Şablon klasörü…", self._sablon_klasoru_sec).pack(side='left')
         self.sablon_lbl = tk.Label(wf, text=self._sablon_ozet(), font=('Segoe UI',8),
                                    bg=APP, fg=GRI, anchor='w')
-        self.sablon_lbl.pack(side='left', padx=(6,0), fill='x', expand=True)
+        self.sablon_lbl.pack(side='left', padx=(8,0), fill='x', expand=True)
         tk.Label(t3, text="İnceleme Dayanağı (sözleşme) — her Word tutanağına yazılır:",
                  font=F_KUC, bg=APP, fg=KOYU, anchor='w',
                  wraplength=300, justify='left').pack(fill='x')
@@ -1816,38 +1851,37 @@ class KDVBolmeApp:
         except Exception:
             pass
 
-        # ── Sürükle-bırak ──
-        self.birak = tk.Frame(sol, bg=KART, relief='solid', bd=1, cursor='hand2')
-        self.birak.pack(fill='both', expand=True, pady=(0,8))
+        # ── Sürükle-bırak (davetkâr, vurgu kenarlı kart) ──
+        self.birak = tk.Frame(sol, bg=KART, relief='flat', bd=0, cursor='hand2',
+                              highlightbackground=ACCENT, highlightcolor=ACCENT,
+                              highlightthickness=2)
+        self.birak.pack(fill='both', expand=True, pady=(2,10))
 
-        self.birak_ikon = tk.Label(self.birak, text="🗂",
-                                   font=('Segoe UI',34), bg=KART)
-        self.birak_ikon.pack(expand=True, pady=(20,4))
+        self.birak_ikon = tk.Label(self.birak, text="📥",
+                                   font=('Segoe UI',36), bg=KART, fg=ACCENT)
+        self.birak_ikon.pack(expand=True, pady=(22,2))
 
         self.birak_yazi = tk.Label(self.birak,
                                    text="Liste dosyalarını buraya sürükleyin",
-                                   font=F_BLK, bg=KART, fg=GRI,
+                                   font=('Segoe UI',11,'bold'), bg=KART, fg=KOYU,
                                    wraplength=300, justify='center')
-        self.birak_yazi.pack(expand=True, pady=(0,4))
+        self.birak_yazi.pack(expand=True, pady=(0,2))
 
         self.birak_alt = tk.Label(self.birak,
-                                  text="ya da tıklayın  •  Excel / CSV / TXT  •  çoklu seçilebilir",
-                                  font=('Segoe UI',8), bg=KART, fg='#9CA3AF',
+                                  text="ya da tıklayarak seçin\nExcel · CSV · TXT  (çoklu seçilebilir)",
+                                  font=('Segoe UI',8), bg=KART, fg=GRI,
                                   wraplength=300, justify='center')
-        self.birak_alt.pack(pady=(0,14))
+        self.birak_alt.pack(pady=(0,16))
 
         for w in (self.birak, self.birak_ikon, self.birak_yazi, self.birak_alt):
             w.bind('<Button-1>', self._tiklayarak_sec)
 
-        self.durum_lbl = tk.Label(sol, text="Hazır",
-                                  font=F_KUC, bg=APP, fg=GRI)
-        self.durum_lbl.pack()
+        self.durum_lbl = tk.Label(sol, text="● Hazır",
+                                  font=('Segoe UI',9), bg=APP, fg=YESIL)
+        self.durum_lbl.pack(anchor='w')
 
         # ── İlerleme çubuğu (işlem sırasında firma sayısına göre dolar) ──
         try:
-            stil = ttk.Style()
-            stil.configure("Ymm.Horizontal.TProgressbar",
-                           troughcolor='#E2E8F0', background='#68D391')
             self.ilerleme_var = tk.DoubleVar(value=0)
             self.ilerleme_bar = ttk.Progressbar(
                 sol, style="Ymm.Horizontal.TProgressbar",
@@ -1856,7 +1890,7 @@ class KDVBolmeApp:
             self.ilerleme_bar.pack(fill='x', pady=(6, 0))
             self.ilerleme_yazi = tk.Label(sol, text="", font=('Segoe UI', 8),
                                           bg=APP, fg=GRI)
-            self.ilerleme_yazi.pack()
+            self.ilerleme_yazi.pack(anchor='w')
         except Exception:
             self.ilerleme_var = None
             self.ilerleme_bar = None
@@ -1864,29 +1898,32 @@ class KDVBolmeApp:
 
         # ── Sağ panel (log) ──
         sag = tk.Frame(self.root, bg=APP)
-        sag.pack(side='right', fill='both', expand=True, padx=(0,18), pady=18)
+        sag.pack(side='right', fill='both', expand=True, padx=(0,16), pady=14)
 
-        tk.Label(sag, text="İşlem Günlüğü",
-                 font=F_BLK, bg=APP, fg=KOYU, anchor='w').pack(fill='x')
+        basr = tk.Frame(sag, bg=APP); basr.pack(fill='x')
+        tk.Label(basr, text="İşlem Günlüğü", font=('Segoe UI',10,'bold'),
+                 bg=APP, fg=KOYU, anchor='w').pack(side='left')
+        tk.Label(basr, text="canlı", font=('Segoe UI',8), bg=APP, fg=GRI).pack(side='right')
 
-        lf = tk.Frame(sag, bg='#0F0F1A')
-        lf.pack(fill='both', expand=True, pady=(4,0))
+        lf = tk.Frame(sag, bg=LOG_BG, highlightbackground=KENAR, highlightthickness=1)
+        lf.pack(fill='both', expand=True, pady=(6,0))
 
-        self.log = tk.Text(lf, font=F_CON, bg='#0F0F1A', fg='#A0AEC0',
-                           relief='flat', bd=8, wrap='word', state='disabled')
+        self.log = tk.Text(lf, font=F_CON, bg=LOG_BG, fg='#CBD5E1',
+                           relief='flat', bd=10, wrap='word', state='disabled',
+                           insertbackground='#CBD5E1', selectbackground='#334155')
         sb = ttk.Scrollbar(lf, command=self.log.yview)
         self.log.configure(yscrollcommand=sb.set)
         sb.pack(side='right', fill='y')
         self.log.pack(fill='both', expand=True)
 
-        self.log.tag_config('ok',   foreground='#68D391')
-        self.log.tag_config('err',  foreground='#FC8181')
-        self.log.tag_config('info', foreground='#90CDF4')
-        self.log.tag_config('warn', foreground='#F6AD55')
+        self.log.tag_config('ok',   foreground='#4ADE80')
+        self.log.tag_config('err',  foreground='#F87171')
+        self.log.tag_config('info', foreground='#7DD3FC')
+        self.log.tag_config('warn', foreground='#FBBF24')
 
         self._log("e-YMM Karşıt İnceleme Asistanı hazır.\n"
-                  "Kriterleri güncelleyin,\n"
-                  "KDV listesini sol tarafa sürükleyin.", "info")
+                  "Soldaki sekmelerden kriter ve çıktı türünü seçin,\n"
+                  "sonra listeyi bırakma alanına sürükleyin.", "info")
 
     def _esik_satir(self, parent, etiket, var, ipucu):
         tk.Label(parent, text=etiket, font=F_KUC, bg=APP,
