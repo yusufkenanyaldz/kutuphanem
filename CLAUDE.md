@@ -105,11 +105,13 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 - `N) …_.pdf` — **opsiyonel** okunur PDF kopyası (yalnızca `reportlab` kuruluysa ve
   kullanıcı "PDF üret"i işaretlerse; `firma_pdf_olustur`). Resmî yükleme dosyası
   yine Excel'dir; PDF arşiv/imza kopyasıdır.
-- `N) …_.doc` — **opsiyonel** Word tutanağı: kullanıcının hazır `.doc` şablonları
+- `N) …_.doc/.docx` — **opsiyonel** Word tutanağı: kullanıcının hazır şablonları
   **VKN ile eşleştirilip** ("NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN" bloğu)
   yalnızca "Karşıt İncelemeye Konu Fatura" tablosu firmanın faturalarıyla
-  güncellenir. Diğer her şey sabit kalır. Yazma adımı **Windows + Word (pywin32
-  COM)** gerektirir; okuma/eşleştirme saf Python'dur (`olefile`).
+  güncellenir. Diğer her şey sabit kalır. **`.docx` şablonlar `python-docx` ile
+  Word GEREKTİRMEDEN** üretilir (çıktı `.docx`); **`.doc` (eski ikili)** için
+  yazma adımı Windows + Word (pywin32 COM) gerektirir. Okuma/eşleştirme her iki
+  biçim için de saf Python'dur (`.doc`→olefile, `.docx`→python-docx).
 - `WORD_ESLESME_DÖNEM.xlsx` — hangi seçili firmanın şablonu var/yok ve Word
   tutanağının üretilip üretilmediği (Word olmadan da çıkarılır).
 
@@ -140,7 +142,10 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `sablon_vkn_metinden` / `sablon_vkn_oku` | Tutanak metninden karşı firmanın (vkn, unvan) bilgisini "NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN" bloğundan çıkarır. |
 | `_vkn_metinden_ayikla` | Metinden 10-11 haneli VKN/TCKN (boşlukları temizler, 8-9→zfill, yer tutucu geçersiz) — filtreyle aynı normalize. |
 | `sablonlari_indeksle` | Klasördeki `.doc` şablonları VKN→yol olarak indeksler (alt klasörler dahil). |
-| `firma_word_olustur` / `word_destekli` | Eşleşen şablonu Word (COM) ile açıp fatura tablosunu günceller, yeni `.doc` yazar (Windows + Word). |
+| `firma_docx_olustur` / `docx_destekli` | `.docx` şablonu python-docx ile açıp fatura tablosunu doldurur, yeni `.docx` yazar (**Word gerektirmez**). |
+| `firma_word_olustur` / `word_destekli` | Eski `.doc` şablonu Word (COM) ile açıp fatura tablosunu günceller (Windows + Word). |
+| `firma_word_uret` / `sablon_uretilebilir_mi` | Uzantıya göre doğru üreticiyi seçer (.docx→python-docx, .doc→COM); ön koşulu denetler. |
+| `_docx_metni_oku` | `.docx` metnini (paragraf + tablo hücreleri, sekmeli) çıkarır — VKN okuma için. |
 | `_word_fatura_satiri` / `_fatura_tablosu_mu` / `_tr_para_str` | Fatura satırını Word tablo sırasına çevirir; fatura tablosunu başlığından tanır; TR para biçimi. |
 | `_gecersizlik_nedeni` | Geçersiz VKN için insan-okur neden metni. |
 | `firmalari_filtrele` | **KALP.** VKN normalize, geçerli/geçersiz ayrım, 2 aşamalı %80 seçimi. |
@@ -157,10 +162,10 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 ## 7. Çalıştırma, bağımlılıklar, derleme
 
 - Python 3, bağımlılıklar: `pandas`, `openpyxl`, `xlrd` (eski `.xls` için),
-  `pillow` (logo), `olefile` (hazır `.doc` şablonlardan VKN okuma). **Opsiyonel:**
-  `reportlab` (PDF kopya), `pywin32` (yalnızca Windows'ta Word `.doc` tutanak
-  üretimi — yoksa program çalışır, sadece o özellik devre dışı). Tkinter standart
-  kütüphanede. Testler için: `pytest`.
+  `pillow` (logo), `olefile` (`.doc` şablon okuma), `python-docx` (`.docx` şablon
+  okuma+yazma). **Opsiyonel:** `reportlab` (PDF kopya), `pywin32` (yalnızca eski
+  `.doc` şablonlardan üretim — Windows + Word; `.docx` şablonlar Word'süz üretilir).
+  Tkinter standart kütüphanede. Testler için: `pytest`.
 - Kullanıcı ayarları (son eşik/yüzde, **çıktı klasörü, PDF tercihi**)
   `~/.exay_ayarlar.json` içinde saklanır (Program Files gibi yazılamayan
   konumlarda sorun çıkmasın diye).

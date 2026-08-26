@@ -607,3 +607,87 @@ def test_gui_kurulur_ve_callbackler_tanimli():
               "_sablon_ozet", "_kriter_al", "_ilerleme", "_tamam", "_log",
               "_ayar_kaydet", "_birak_guncelle", "_dnd_ayikla"]:
         assert callable(getattr(app, m)), f"Eksik/çağrılamaz metot: {m}"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  .docx şablon yolu — okuma (VKN) + yazma (fatura tablosu), Word GEREKTİRMEZ
+# ══════════════════════════════════════════════════════════════════════════
+def _docx_sablon_yaz(yol, unvan, vd_hucre):
+    """Gerçek tutanak yapısını taklit eden sentetik .docx şablon üretir:
+    2 sütunlu bilgi tablosu (NEZDİNDE bloğu) + 7 sütunlu fatura tablosu."""
+    import docx
+    d = docx.Document()
+    t0 = d.add_table(rows=0, cols=2)
+    for etiket, deger in [
+        ("YEMİNLİ MALİ MÜŞAVİRİN", "SABRİ HAMAMCI"),
+        ("İADE TALEBİNDE BULUNAN FİRMANIN", "İADE TALEBİNDE BULUNAN FİRMANIN"),
+        ("Ünvanı", "İNALOĞLU İNŞAAT"),
+        ("Vergi Dairesi/Nosu", "ŞAHİNBEY / 475 056 9431"),
+        ("NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN", "NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN"),
+        ("Ünvanı", unvan),
+        ("Vergi Dairesi/Nosu", vd_hucre),
+        ("İNCELEME DAYANAĞI", "31.01.2026 Tarih ve 09 Sayılı"),
+    ]:
+        r = t0.add_row().cells
+        r[0].text = etiket; r[1].text = deger
+    d.add_paragraph("Karşıt İncelemeye Konu Fatura ve Benzeri Belgeye ilişkin bilgiler:")
+    t2 = d.add_table(rows=3, cols=7)
+    b0 = ["FATURANIN", "FATURANIN", "MALIN", "MALIN", "MALIN", "MALIN", "Defter Kayıt"]
+    b1 = ["Tarihi", "Numarası", "Cinsi", "Miktarı", "Tutarı", "KDV Tutarı", "Tarihi/Nosu"]
+    for c, v in enumerate(b0): t2.rows[0].cells[c].text = v
+    for c, v in enumerate(b1): t2.rows[1].cells[c].text = v
+    d.save(yol)
+
+
+def test_docx_sablon_vkn_oku(tmp_path):
+    yol = tmp_path / "ispa.docx"
+    _docx_sablon_yaz(yol, "İSPA İNŞ. SAN. PAZ. A.Ş.", "ÜSKÜDAR V.D. – 481 001 7371")
+    vkn, unvan = exay.sablon_vkn_oku(str(yol))
+    assert vkn == "4810017371"                       # boşluklu VKN düzeltilir
+    assert "İSPA" in unvan
+
+
+def test_sablonlari_indeksle_docx_dahil(tmp_path):
+    _docx_sablon_yaz(tmp_path / "a.docx", "FIRMA A", "V.D. 1234567890")
+    idx = exay.sablonlari_indeksle(str(tmp_path))
+    assert idx.get("1234567890", "").endswith("a.docx")   # .docx da indekslenir
+
+
+def test_firma_docx_olustur_tabloyu_doldurur(tmp_path):
+    import docx
+    sablon = tmp_path / "sablon.docx"
+    _docx_sablon_yaz(sablon, "İSPA İNŞ. SAN. PAZ. A.Ş.", "V.D. 4810017371")
+    # iki faturalı bir firma
+    kols = ["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su",
+            "Alınan Mal ve/veya Hizmetin Cinsi", "Alınan Mal ve/veya Hizmetin Miktarı",
+            "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı", "KDV'si"]
+    firma = pd.DataFrame([
+        ["2026-07-22", "S0120260058", "İNŞAAT MALZ.", "6 ADET", 2595795.15, 516799.39],
+        ["2026-07-25", "S0120260059", "DEMİR", "10 TON", 100000.00, 20000.00],
+    ], columns=kols)
+    cikti = tmp_path / "cikti.docx"
+    exay.firma_docx_olustur(str(sablon), firma, str(cikti), kols)
+    d = docx.Document(str(cikti))
+    fatura = next(t for t in d.tables if len(t.columns) == 7)
+    # 2 başlık satırı + 2 veri satırı = 4
+    assert len(fatura.rows) == 4
+    veri = [[c.text.strip() for c in r.cells] for r in fatura.rows[2:]]
+    assert veri[0][0] == "22.07.2026"
+    assert veri[0][1] == "S0120260058"
+    assert veri[0][3] == "6 ADET"                    # miktar
+    assert veri[0][4] == "2.595.795,15"              # TR tutar
+    assert veri[0][5] == "516.799,39"
+    assert veri[1][2] == "DEMİR"
+    assert veri[1][3] == "10 TON"
+
+
+def test_dosyalari_isle_docx_word_uretir(tmp_path):
+    """Uçtan uca: .docx şablon eşleşince gerçek Word tutanağı üretilmeli (Word yok)."""
+    yol = tmp_path / "NISAN_2026.xlsx"
+    _yeni_gib_yaz(yol)     # FIRMA A = 1000000001 (seçilir)
+    sk = tmp_path / "sablonlar"; sk.mkdir()
+    _docx_sablon_yaz(sk / "firmaA.docx", "FIRMA A", "V.D. 1000000001")
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        sablon_klasor=str(sk))
+    uretilen = list((tmp_path / "Hazır Tutanaklar").glob("*.docx"))
+    assert any("1000000001" in p.name for p in uretilen), "İSPA benzeri Word tutanağı üretilmedi"
