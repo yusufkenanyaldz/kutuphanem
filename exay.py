@@ -1663,6 +1663,17 @@ class KDVBolmeApp:
         parcalar = re.findall(r'\{([^}]*)\}|(\S+)', str(data))
         return [a or b for a, b in parcalar if (a or b)]
 
+    def _tiklayarak_sec(self, e=None):
+        """Sürükle-bırak alanına tıklanınca dosya seçtirir (çoklu seçim)."""
+        dosyalar = filedialog.askopenfilenames(
+            title="KDV Liste(ler)ini Seçin",
+            filetypes=[("Desteklenen", "*.xls *.xlsx *.csv *.txt"),
+                       ("Excel", "*.xls *.xlsx"),
+                       ("CSV/Metin", "*.csv *.txt"),
+                       ("Tümü", "*.*")])
+        if dosyalar:
+            self._isle_coklu(list(dosyalar))
+
     def _cikis_ozet(self):
         if self._cikis_kok:
             return f"→ {Path(self._cikis_kok).name or self._cikis_kok}"
