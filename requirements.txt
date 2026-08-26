@@ -1,0 +1,14 @@
+# e-YMM Karşıt İnceleme Asistanı — bağımlılıklar
+pandas
+openpyxl
+xlrd          # eski .xls dosyaları için
+pillow        # GUI logosu için
+
+olefile       # hazır .doc Word şablonlarından VKN okuma (eşleştirme) için
+
+# Opsiyonel — kurulu değilse program çalışır, sadece ilgili özellik devre dışı:
+reportlab     # "PDF kopya da üret" seçeneği için
+pywin32 ; platform_system == "Windows"   # Word (.doc) tutanak üretimi için (yalnızca Windows + Word)
+
+# Geliştirme / test:
+pytest
