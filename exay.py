@@ -1667,10 +1667,10 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
 # ══════════════════════════════════════════
 #  GUI
 # ══════════════════════════════════════════
-APP="#EEF1F7"; KART="#FFFFFF"; KOYU="#1F2937"
-KIRMIZI="#E63946"; GRI="#6B7280"; TURUNCU="#F59E0B"
-ACCENT="#4F46E5"; ACCENT2="#4338CA"; KENAR="#E3E7EF"; BASLIK_BG="#1E293B"
-YESIL="#16A34A"; LOG_BG="#0F172A"
+APP="#F4F1F2"; KART="#FFFFFF"; KOYU="#241A1C"
+KIRMIZI="#A61C2B"; GRI="#7A6E70"; TURUNCU="#C2410C"
+ACCENT="#A61C2B"; ACCENT2="#851521"; KENAR="#E7DCDE"; BASLIK_BG="#6E1423"
+YESIL="#15803D"; LOG_BG="#1B1417"; SEKME_BG="#EBDEE0"
 F_ANA=('Segoe UI',10); F_BLK=('Segoe UI',10,'bold')
 F_KUC=('Segoe UI',9);  F_BAS=('Segoe UI',13,'bold')
 F_CON=('Consolas',9)
@@ -1743,7 +1743,7 @@ class KDVBolmeApp:
             try: st.theme_use('clam')
             except Exception: pass
             st.configure("TNotebook", background=APP, borderwidth=0, tabmargins=(2,4,2,0))
-            st.configure("TNotebook.Tab", background="#DDE3EE", foreground=GRI,
+            st.configure("TNotebook.Tab", background=SEKME_BG, foreground=GRI,
                          font=('Segoe UI',9,'bold'), padding=(16,8), borderwidth=0)
             st.map("TNotebook.Tab",
                    background=[('selected', APP)],
@@ -1753,8 +1753,8 @@ class KDVBolmeApp:
                          relief='flat', padding=5)
             st.configure("Ymm.Horizontal.TProgressbar",
                          troughcolor=KENAR, background=ACCENT, borderwidth=0, thickness=8)
-            st.configure("Vertical.TScrollbar", background="#CBD5E1",
-                         troughcolor=LOG_BG, borderwidth=0, arrowcolor=GRI)
+            st.configure("Vertical.TScrollbar", background="#8A6E72",
+                         troughcolor=LOG_BG, borderwidth=0, arrowcolor="#E7DCDE")
         except Exception:
             pass
 
@@ -1763,7 +1763,7 @@ class KDVBolmeApp:
         if tur == 'ana':
             bg, fg, hov = ACCENT, 'white', ACCENT2
         else:
-            bg, fg, hov = KART, KOYU, '#EAEEF6'
+            bg, fg, hov = KART, KOYU, '#F3E9EA'
         b = tk.Button(parent, text=text, command=cmd, font=('Segoe UI',9),
                       bg=bg, fg=fg, activebackground=hov, activeforeground=fg,
                       relief='flat', bd=0, padx=12, pady=6, cursor='hand2',
@@ -1779,13 +1779,13 @@ class KDVBolmeApp:
         hdr = tk.Frame(self.root, bg=BASLIK_BG, height=62)
         hdr.pack(side='top', fill='x'); hdr.pack_propagate(False)
         mono = tk.Canvas(hdr, width=40, height=40, bg=BASLIK_BG, highlightthickness=0)
-        mono.create_oval(3, 3, 37, 37, fill=ACCENT, outline='')
-        mono.create_text(20, 20, text="Y", fill='white', font=('Segoe UI',16,'bold'))
+        mono.create_oval(2, 2, 38, 38, fill='#F6EFE0', outline='#E3C77A', width=2)
+        mono.create_text(20, 21, text="YMM", fill=BASLIK_BG, font=('Segoe UI',9,'bold'))
         mono.pack(side='left', padx=(18,12), pady=11)
         bsol = tk.Frame(hdr, bg=BASLIK_BG); bsol.pack(side='left', pady=(12,0), anchor='w')
         tk.Label(bsol, text="Karşıt İnceleme Asistanı", bg=BASLIK_BG, fg='white',
                  font=('Segoe UI',14,'bold')).pack(anchor='w')
-        tk.Label(bsol, text=f"e-YMM  ·  Sürüm {SURUM}", bg=BASLIK_BG, fg='#94A3B8',
+        tk.Label(bsol, text=f"e-YMM  ·  Sürüm {SURUM}", bg=BASLIK_BG, fg='#E4B8BE',
                  font=('Segoe UI',8)).pack(anchor='w')
 
         # ── Sol panel (ayarlar) ──
