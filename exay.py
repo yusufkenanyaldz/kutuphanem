@@ -798,6 +798,14 @@ def firma_pdf_olustur(firma_df, pdf_dosya, tum_kolonlar, vkn='', unvan='', donem
 #  faturalarıyla güncellenir. Diğer her şey (YMM, iade talep eden firma, defter
 #  onayları) değişmeden kalır.
 # ══════════════════════════════════════════
+def _ascii_kucuk(s):
+    """Türkçe karakterleri ASCII'ye indirip küçük harfe çevirir. Python'un
+    str.lower()'ı Türkçe'de yanıltıcıdır ('İ'.lower() → noktalı 'i̇'), bu yüzden
+    anahtar-kelime eşleşmelerinde bunu kullan (İNCELEME → inceleme)."""
+    tr = {'İ': 'i', 'I': 'i', 'ı': 'i', 'Ş': 's', 'ş': 's', 'Ğ': 'g', 'ğ': 'g',
+          'Ü': 'u', 'ü': 'u', 'Ö': 'o', 'ö': 'o', 'Ç': 'c', 'ç': 'c'}
+    return ''.join(tr.get(c, c) for c in str(s)).lower()
+
 def _tr_para_str(v):
     """Sayıyı Türkçe biçimde metne çevirir: 683200.0 → '683.200,00'. Boşsa ''."""
     f = para_deger(v)
@@ -946,14 +954,20 @@ def _word_fatura_satiri(row, kolonlar):
         '',   # Defter Kayıt Tarihi/Nosu — kullanıcı isteğiyle boş
     ]
 
+# Fatura tablosunda 'başlık satırı' sayılacak anahtarlar (ASCII, küçük harf).
+# _ascii_kucuk ile karşılaştırılır ki Türkçe İ/ı casing sorun çıkarmasın.
+_BAS_KELIME = ('faturanin', 'malin', 'tarih', 'numar', 'cins',
+               'miktar', 'tutar', 'kdv', 'defter', 'nosu', 'belge')
+
 def _fatura_tablosu_mu(basliklar):
     """Bir Word tablosunun başlık hücre metinlerine bakıp 'Karşıt İncelemeye Konu
     Fatura' tablosu olup olmadığına karar verir."""
-    b = ' '.join(basliklar).lower()
+    b = _ascii_kucuk(' '.join(basliklar))
     imzalar = ('tarih', 'numar', 'kdv')          # Tarihi + Numarası + KDV Tutarı
     return sum(1 for x in imzalar if x in b) >= 2 and ('cins' in b or 'tutar' in b)
 
-def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=None):
+def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=None,
+                       inceleme_dayanagi=None):
     """Eşleşen .doc şablonunu Word (COM) ile açar, 'Karşıt İncelemeye Konu Fatura'
     tablosunun VERİ satırlarını firma faturalarıyla değiştirir ve `cikis_yol`'a
     YENİ dosya olarak kaydeder. Şablonun kendisi değiştirilmez.
@@ -1017,12 +1031,10 @@ def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
             # Veri başlangıcı: baştan başlık gibi görünen satırları (FATURANIN,
             # MALIN, Tarihi, Numarası, Cinsi, Miktarı, Tutarı, KDV, Defter...)
             # atla; ilk veri satırında dur.
-            BAS_KELIME = ('faturanın', 'malin', 'malın', 'tarihi', 'numar', 'cinsi',
-                          'miktar', 'tutar', 'kdv', 'defter', 'nosu', 'belge')
             veri_bas = 1
             for r in range(1, rmax + 1):
-                txt = _satir_metni(tbl, r).lower()
-                if txt and any(k in txt for k in BAS_KELIME):
+                txt = _ascii_kucuk(_satir_metni(tbl, r))
+                if txt.strip() and any(k in txt for k in _BAS_KELIME):
                     veri_bas = r + 1
                 else:
                     break
@@ -1056,6 +1068,36 @@ def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
                     except Exception:
                         pass
             yazilan += 1
+
+        # İnceleme Dayanağı (sözleşme) verildiyse etiketin yanındaki hücreyi güncelle
+        if inceleme_dayanagi:
+            yazildi = False
+            for tbl in doc.Tables:
+                try:
+                    rmax = tbl.Rows.Count
+                except Exception:
+                    continue
+                for r in range(1, rmax + 1):
+                    try:
+                        hucreler2 = list(tbl.Rows(r).Cells)
+                    except Exception:
+                        continue
+                    for ci, hc in enumerate(hucreler2):
+                        et = _ascii_kucuk(re.sub(r'[\r\x07\x02]', '', hc.Range.Text))
+                        if 'inceleme dayana' in et and ci + 1 < len(hucreler2):
+                            try:
+                                hucreler2[ci + 1].Range.Text = inceleme_dayanagi
+                                yazildi = True
+                            except Exception:
+                                pass
+                            break
+                    if yazildi:
+                        break
+                if yazildi:
+                    break
+            if not yazildi:
+                _yaz("      ⚠️ 'İNCELEME DAYANAĞI' alanı şablonda bulunamadı; sözleşme "
+                     "bilgisi güncellenemedi.", "warn")
 
         os.makedirs(os.path.dirname(os.path.abspath(cikis_yol)), exist_ok=True)
         # 0 = wdFormatDocument (.doc). Şablonla aynı biçimde kaydet.
@@ -1104,7 +1146,22 @@ def _docx_hucre_yaz(cell, metin):
     else:
         p.add_run(metin)
 
-def firma_docx_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=None):
+def _docx_inceleme_dayanagi_yaz(doc, metin):
+    """'İNCELEME DAYANAĞI' satırının DEĞER hücresini `metin` ile günceller (tarih/
+    sözleşme her yıl değişir; eski şablonun eski bilgisi otomatik ezilir).
+    Bulup yazarsa True. Etiket hücresi ('İNCELEME DAYANAĞI') değişmez."""
+    for tbl in doc.tables:
+        for row in tbl.rows:
+            cells = row.cells
+            if cells and 'inceleme dayana' in _ascii_kucuk(cells[0].text):
+                for c in cells[1:]:
+                    if c._tc is not cells[0]._tc:   # birleşik değil, gerçek değer hücresi
+                        _docx_hucre_yaz(c, metin)
+                        return True
+    return False
+
+def firma_docx_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=None,
+                       inceleme_dayanagi=None):
     """Modern .docx şablonunu python-docx ile açar, 'Karşıt İncelemeye Konu
     Fatura' tablosunun VERİ satırlarını firma faturalarıyla değiştirir ve
     `cikis_yol`'a yeni .docx olarak kaydeder. Şablon değiştirilmez.
@@ -1134,12 +1191,10 @@ def firma_docx_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
         raise RuntimeError("Şablonda fatura tablosu bulunamadı")
 
     # Veri başlangıç satırı: baştaki başlık satırlarını atla
-    BAS_KELIME = ('faturanın', 'malin', 'malın', 'tarihi', 'numar', 'cinsi',
-                  'miktar', 'tutar', 'kdv', 'defter', 'nosu', 'belge')
     veri_bas = 0
     for i, row in enumerate(hedef.rows):
-        txt = ' '.join(c.text for c in row.cells).strip().lower()
-        if txt and any(k in txt for k in BAS_KELIME):
+        txt = _ascii_kucuk(' '.join(c.text for c in row.cells))
+        if txt.strip() and any(k in txt for k in _BAS_KELIME):
             veri_bas = i + 1
         else:
             break
@@ -1165,22 +1220,31 @@ def firma_docx_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
                 _docx_hucre_yaz(cell, hucreler[ci])
         yazilan += 1
 
+    # İnceleme Dayanağı (sözleşme tarihi/no) verildiyse değer hücresini güncelle
+    if inceleme_dayanagi:
+        if not _docx_inceleme_dayanagi_yaz(doc, inceleme_dayanagi):
+            _yaz("      ⚠️ 'İNCELEME DAYANAĞI' alanı şablonda bulunamadı; sözleşme "
+                 "bilgisi güncellenemedi.", "warn")
+
     os.makedirs(os.path.dirname(os.path.abspath(cikis_yol)), exist_ok=True)
     gercek = _guvenli_docx_kaydet(doc, cikis_yol)
     _yaz(f"      📝 Word tutanağı: {Path(gercek).name} ({yazilan} fatura satırı)", "ok")
     return gercek
 
 def firma_word_uret(sablon_yol, firma_df, cikis_kl, sira_no, donem, vkn, temiz,
-                    tum_kolonlar, log_cb=None):
+                    tum_kolonlar, log_cb=None, inceleme_dayanagi=None):
     """Eşleşen şablondan firma tutanağı üretir; uzantıya göre doğru yöntemi seçer:
       .docx → python-docx (Word gerektirmez),  .doc → Word COM (Windows + Word).
-    Çıktı, şablonla aynı uzantıda `cikis_kl` içine yazılır."""
+    Çıktı, şablonla aynı uzantıda `cikis_kl` içine yazılır. `inceleme_dayanagi`
+    verilirse tutanaktaki 'İNCELEME DAYANAĞI' (sözleşme) alanı da güncellenir."""
     ext = Path(sablon_yol).suffix.lower()
     ad = f"{sira_no}) {donem.replace('.','_')}_{vkn}_{temiz}{ext}"
     cikis = str(Path(cikis_kl) / ad)
     if ext == '.docx':
-        return firma_docx_olustur(sablon_yol, firma_df, cikis, tum_kolonlar, log_cb)
-    return firma_word_olustur(sablon_yol, firma_df, cikis, tum_kolonlar, log_cb)
+        return firma_docx_olustur(sablon_yol, firma_df, cikis, tum_kolonlar, log_cb,
+                                  inceleme_dayanagi=inceleme_dayanagi)
+    return firma_word_olustur(sablon_yol, firma_df, cikis, tum_kolonlar, log_cb,
+                              inceleme_dayanagi=inceleme_dayanagi)
 
 def sablon_uretilebilir_mi(sablon_yol):
     """Bu şablon türü için üretim yapılabilir mi? (.docx→python-docx, .doc→Word COM)"""
@@ -1249,7 +1313,7 @@ def ozet_rapor_olustur(df, secilen, df_gecersiz, esik_tek, esik_toplam,
 # ══════════════════════════════════════════
 def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb,
                    ilerleme_cb=None, cikis_kok=None, pdf_uret=False,
-                   sablon_klasor=None, cikti_turu='ikisi'):
+                   sablon_klasor=None, cikti_turu='ikisi', inceleme_dayanagi=None):
     # ilerleme_cb(tamamlanan, toplam): GUI ilerleme çubuğunu günceller.
     # None geçilirse (ör. başsız test) hiçbir şey yapmaz.
     # cikis_kok: çıktı klasörünün üst dizini (None → kaynak dosyanın yanı).
@@ -1372,6 +1436,9 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
             except Exception as e:
                 log_cb(f"  ⚠️ Şablon klasörü okunamadı: {e}", "warn")
             log_cb(f"  {len(sablon_index)} şablon VKN ile indekslendi.", "ok")
+            if inceleme_dayanagi:
+                log_cb(f"  🗓 İnceleme Dayanağı her Word tutanağına yazılacak: "
+                       f"\"{inceleme_dayanagi}\"", "info")
             # Şablon uzantılarına göre üretim ön koşulunu kontrol et
             idx_docx = any(v.lower().endswith('.docx') for v in sablon_index.values())
             idx_doc  = any(v.lower().endswith('.doc') for v in sablon_index.values())
@@ -1432,7 +1499,8 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                     if sablon_uretilebilir_mi(sy):
                         try:
                             firma_word_uret(sy, grp, cikis_kl, sira_no, donem,
-                                            vkn, temiz, list(df.columns), log_cb)
+                                            vkn, temiz, list(df.columns), log_cb,
+                                            inceleme_dayanagi=inceleme_dayanagi)
                             word_uretilen.append(vkn)
                             uretildi = True
                         except Exception as we:
@@ -1609,8 +1677,8 @@ class KDVBolmeApp:
     def __init__(self, root):
         self.root = root
         self.root.title(f"YMM Karşıt İnceleme Asistanı  v{SURUM}")
-        self.root.geometry("780x620")
-        self.root.minsize(780, 580)
+        self.root.geometry("860x650")
+        self.root.minsize(820, 600)
         self.root.configure(bg=APP)
         # Pencere başlık çubuğu ikonu (logo.ico varsa)
         try:
@@ -1632,6 +1700,8 @@ class KDVBolmeApp:
         self._sablon_klasor = ayar.get("sablon_klasor") or None  # Word şablon klasörü
         # Çıktı türü: 'excel' | 'word' | 'ikisi'
         self.cikti_turu  = tk.StringVar(value=ayar.get("cikti_turu", "excel"))
+        # İnceleme Dayanağı (sözleşme) — her yıl değişir; boşsa şablon aynen kalır
+        self.inceleme_dayanagi = tk.StringVar(value=ayar.get("inceleme_dayanagi", ""))
 
         self._ui()
         self._surukle_birak()
@@ -1659,6 +1729,7 @@ class KDVBolmeApp:
                     "pdf_uret":    bool(self.pdf_uret.get()),
                     "sablon_klasor": self._sablon_klasor or "",
                     "cikti_turu":  self.cikti_turu.get(),
+                    "inceleme_dayanagi": self.inceleme_dayanagi.get(),
                 }, f, ensure_ascii=False)
         except Exception:
             pass
@@ -1674,51 +1745,44 @@ class KDVBolmeApp:
 
         tk.Label(sol, text="Karşıt İnceleme Hazırlayıcı",
                  font=F_BAS, bg=APP, fg=KOYU,
-                 wraplength=270, justify='center').pack(pady=(6,2))
-        tk.Label(sol, text="Excel dosyasını aşağıya bırakın",
-                 font=F_KUC, bg=APP, fg=GRI).pack(pady=(0,10))
+                 wraplength=310, justify='center').pack(pady=(6,0))
+        tk.Label(sol, text=f"e-YMM  •  v{SURUM}",
+                 font=('Segoe UI',8), bg=APP, fg=GRI).pack(pady=(0,10))
 
-        # ── Eşik kutusu ──
-        ef = tk.LabelFrame(sol, text="  Kapsam Kriterleri  ",
-                           font=('Segoe UI',9,'bold'),
-                           bg=APP, fg=KOYU, relief='solid', bd=1,
-                           padx=10, pady=8)
-        ef.pack(fill='x', pady=(0,10))
+        # ── Ayar sekmeleri (Kriterler / Çıktı / Word Şablon) ──
+        try:
+            _st = ttk.Style()
+            _st.configure("Ymm.TNotebook", background=APP, borderwidth=0)
+            _st.configure("Ymm.TNotebook.Tab", font=('Segoe UI',9,'bold'), padding=(12,5))
+        except Exception:
+            pass
+        nb = ttk.Notebook(sol, style="Ymm.TNotebook")
+        nb.pack(fill='x', pady=(0,10))
 
-        self._esik_satir(ef, "Tek fatura limiti (₺):", self.esik_tek, "ör: 150000")
-        tk.Frame(ef, bg='#E2E8F0', height=1).pack(fill='x', pady=5)
-        self._esik_satir(ef, "Toplam fatura limiti (₺):", self.esik_toplam, "ör: 450000")
-        tk.Frame(ef, bg='#E2E8F0', height=1).pack(fill='x', pady=5)
-        self._esik_satir(ef, "Kapsam yüzdesi (%):", self.yuzde80, "ör: 80")
+        # — Sekme 1: Kriterler —
+        t1 = tk.Frame(nb, bg=APP, padx=10, pady=10); nb.add(t1, text="Kriterler")
+        self._esik_satir(t1, "Tek fatura limiti (₺):", self.esik_tek, "ör: 150000")
+        self._esik_satir(t1, "Toplam fatura limiti (₺):", self.esik_toplam, "ör: 450000")
+        self._esik_satir(t1, "Kapsam yüzdesi (%):", self.yuzde80, "ör: 80")
+        tk.Label(t1, text="Tek fatura ≥ limit  VEYA  toplam ≥ limit; yetmezse\n"
+                          "büyükten küçüğe ekleyerek % karşılanana dek devam eder.",
+                 font=('Segoe UI',8), bg=APP, fg=GRI, justify='left',
+                 wraplength=300).pack(fill='x', pady=(8,0))
 
-        tk.Label(ef, text="Tek fatura ≥ limit  VEYA  toplam ≥ limit\n"
-                          "Yetmezse büyükten küçüğe ekleyerek\n"
-                          "belirtilen % karşılanana kadar devam eder.",
-                 font=('Segoe UI',8), bg=APP, fg=GRI, justify='left').pack(
-                 fill='x', pady=(6,0))
-
-        # ── Seçenekler (PDF + çıktı klasörü) ──
-        sf = tk.LabelFrame(sol, text="  Seçenekler  ",
-                           font=('Segoe UI',9,'bold'),
-                           bg=APP, fg=KOYU, relief='solid', bd=1,
-                           padx=10, pady=6)
-        sf.pack(fill='x', pady=(0,10))
-
-        # Çıktı türü: yalnız Excel / yalnız Word / ikisi
-        tk.Label(sf, text="Çıktı türü:", font=F_KUC, bg=APP, fg=KOYU,
+        # — Sekme 2: Çıktı —
+        t2 = tk.Frame(nb, bg=APP, padx=10, pady=10); nb.add(t2, text="Çıktı")
+        tk.Label(t2, text="Ne üretilsin?", font=F_KUC, bg=APP, fg=KOYU,
                  anchor='w').pack(fill='x')
-        rf = tk.Frame(sf, bg=APP); rf.pack(fill='x', pady=(0,2))
+        rf = tk.Frame(t2, bg=APP); rf.pack(fill='x', pady=(2,8))
         for etiket, deger in [("Excel", "excel"), ("Word", "word"), ("İkisi", "ikisi")]:
             tk.Radiobutton(rf, text=etiket, value=deger, variable=self.cikti_turu,
                            font=F_KUC, bg=APP, fg=KOYU, activebackground=APP,
-                           selectcolor=KART, command=self._ayar_kaydet).pack(side='left', padx=(0,10))
-        tk.Frame(sf, bg='#E2E8F0', height=1).pack(fill='x', pady=6)
-
-        tk.Checkbutton(sf, text="Excel'in yanına PDF kopya da üret",
+                           selectcolor=KART, command=self._ayar_kaydet).pack(side='left', padx=(0,14))
+        tk.Checkbutton(t2, text="Excel'in yanına PDF kopya da üret",
                        variable=self.pdf_uret, onvalue=True, offvalue=False,
                        font=F_KUC, bg=APP, fg=KOYU, activebackground=APP,
-                       anchor='w', command=self._ayar_kaydet).pack(fill='x')
-        cf = tk.Frame(sf, bg=APP); cf.pack(fill='x', pady=(4,0))
+                       anchor='w', command=self._ayar_kaydet).pack(fill='x', pady=(0,6))
+        cf = tk.Frame(t2, bg=APP); cf.pack(fill='x')
         tk.Button(cf, text="Çıktı klasörü…", font=('Segoe UI',8),
                   bg=KART, fg=KOYU, relief='solid', bd=1,
                   command=self._cikis_klasoru_sec).pack(side='left')
@@ -1726,17 +1790,31 @@ class KDVBolmeApp:
                                   bg=APP, fg=GRI, anchor='w')
         self.cikis_lbl.pack(side='left', padx=(6,0), fill='x', expand=True)
 
-        # Word şablonları (VKN ile eşleştirme) — 'Word' veya 'İkisi' seçilince kullanılır
-        tk.Frame(sf, bg='#E2E8F0', height=1).pack(fill='x', pady=6)
-        tk.Label(sf, text="Word/İkisi için hazır şablon klasörü:",
-                 font=F_KUC, bg=APP, fg=KOYU, anchor='w').pack(fill='x')
-        wf = tk.Frame(sf, bg=APP); wf.pack(fill='x', pady=(4,0))
+        # — Sekme 3: Word Şablon —
+        t3 = tk.Frame(nb, bg=APP, padx=10, pady=10); nb.add(t3, text="Word Şablon")
+        tk.Label(t3, text="Hazır .doc/.docx şablon klasörü (VKN ile eşleşir):",
+                 font=F_KUC, bg=APP, fg=KOYU, anchor='w',
+                 wraplength=300, justify='left').pack(fill='x')
+        wf = tk.Frame(t3, bg=APP); wf.pack(fill='x', pady=(2,8))
         tk.Button(wf, text="Şablon klasörü…", font=('Segoe UI',8),
                   bg=KART, fg=KOYU, relief='solid', bd=1,
                   command=self._sablon_klasoru_sec).pack(side='left')
         self.sablon_lbl = tk.Label(wf, text=self._sablon_ozet(), font=('Segoe UI',8),
                                    bg=APP, fg=GRI, anchor='w')
         self.sablon_lbl.pack(side='left', padx=(6,0), fill='x', expand=True)
+        tk.Label(t3, text="İnceleme Dayanağı (sözleşme) — her Word tutanağına yazılır:",
+                 font=F_KUC, bg=APP, fg=KOYU, anchor='w',
+                 wraplength=300, justify='left').pack(fill='x')
+        ttk.Entry(t3, textvariable=self.inceleme_dayanagi,
+                  font=('Segoe UI',9)).pack(fill='x', pady=(2,0))
+        tk.Label(t3, text="ör: 31.01.2026 Tarih ve 09 Sayılı Tam Tasdik Sözleşmesi\n"
+                          "Boş bırakırsanız şablondaki mevcut yazı aynen kalır.",
+                 font=('Segoe UI',8), bg=APP, fg=GRI, justify='left',
+                 wraplength=300).pack(fill='x', pady=(3,0))
+        try:
+            self.inceleme_dayanagi.trace_add('write', lambda *a: self._ayar_kaydet())
+        except Exception:
+            pass
 
         # ── Sürükle-bırak ──
         self.birak = tk.Frame(sol, bg=KART, relief='solid', bd=1, cursor='hand2')
@@ -1747,12 +1825,15 @@ class KDVBolmeApp:
         self.birak_ikon.pack(expand=True, pady=(20,4))
 
         self.birak_yazi = tk.Label(self.birak,
-                                   text="Dosyayı Buraya Sürükleyin",
-                                   font=F_BLK, bg=KART, fg=GRI)
+                                   text="Liste dosyalarını buraya sürükleyin",
+                                   font=F_BLK, bg=KART, fg=GRI,
+                                   wraplength=300, justify='center')
         self.birak_yazi.pack(expand=True, pady=(0,4))
 
-        self.birak_alt = tk.Label(self.birak, text="ya da tıklayın",
-                                  font=F_KUC, bg=KART, fg='#9CA3AF')
+        self.birak_alt = tk.Label(self.birak,
+                                  text="ya da tıklayın  •  Excel / CSV / TXT  •  çoklu seçilebilir",
+                                  font=('Segoe UI',8), bg=KART, fg='#9CA3AF',
+                                  wraplength=300, justify='center')
         self.birak_alt.pack(pady=(0,14))
 
         for w in (self.birak, self.birak_ikon, self.birak_yazi, self.birak_alt):
@@ -1932,6 +2013,7 @@ class KDVBolmeApp:
         esik_tek, esik_toplam, yuzde80 = kriter
         pdf_uret = bool(self.pdf_uret.get())   # ana thread'de oku, worker'a geçir
         cikti_turu = self.cikti_turu.get()
+        inceleme_dayanagi = self.inceleme_dayanagi.get().strip()
         # Word gereken modda şablon klasörü şart; yoksa kullanıcıyı uyar
         sablon_klasor = self._sablon_klasor if cikti_turu in ('word', 'ikisi') else None
         if cikti_turu in ('word', 'ikisi') and not sablon_klasor:
@@ -1956,12 +2038,12 @@ class KDVBolmeApp:
         threading.Thread(
             target=self._batch_worker,
             args=(gecerli, esik_tek, esik_toplam, yuzde80, pdf_uret, sablon_klasor,
-                  cikti_turu),
+                  cikti_turu, inceleme_dayanagi),
             daemon=True
         ).start()
 
     def _batch_worker(self, dosyalar, esik_tek, esik_toplam, yuzde80, pdf_uret,
-                      sablon_klasor=None, cikti_turu='ikisi'):
+                      sablon_klasor=None, cikti_turu='ikisi', inceleme_dayanagi=None):
         toplam_b = 0; toplam_h = 0; son_klasor = None
         n = len(dosyalar)
         for i, dosya in enumerate(dosyalar, 1):
@@ -1974,7 +2056,8 @@ class KDVBolmeApp:
             try:
                 dosyalari_isle(dosya, esik_tek, esik_toplam, yuzde80,
                                self._log, _tamam_ic, self._ilerleme,
-                               self._cikis_kok, pdf_uret, sablon_klasor, cikti_turu)
+                               self._cikis_kok, pdf_uret, sablon_klasor, cikti_turu,
+                               inceleme_dayanagi or None)
             except Exception as e:
                 self._log(f"❌ {e}", "err")
             toplam_b += sonuc.get('b', 0); toplam_h += sonuc.get('h', 0)

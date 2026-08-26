@@ -738,3 +738,35 @@ def test_cikti_ikisi(tmp_path):
                   if p.name[0].isdigit() and ")" in p.name[:4]]
     assert firma_xlsx                                      # Excel tutanakları var (A ve B)
     assert any("1000000001" in p.name for p in kl.glob("*.docx"))  # A için Word da var
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  İnceleme Dayanağı (sözleşme) otomatik güncelleme + Türkçe casing güvenliği
+# ══════════════════════════════════════════════════════════════════════════
+def test_ascii_kucuk_turkce():
+    assert exay._ascii_kucuk("İNCELEME DAYANAĞI") == "inceleme dayanagi"
+    assert "inceleme dayana" in exay._ascii_kucuk("İNCELEME DAYANAĞI")
+    assert exay._ascii_kucuk("ŞUBAT") == "subat"
+
+
+def test_inceleme_dayanagi_docx_gunceller(tmp_path):
+    import docx
+    sablon = tmp_path / "s.docx"
+    _docx_sablon_yaz(sablon, "İSPA A.Ş.", "V.D. 4810017371")
+    kols = ["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su",
+            "Alınan Mal ve/veya Hizmetin Cinsi", "Alınan Mal ve/veya Hizmetin Miktarı",
+            "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı", "KDV'si"]
+    firma = pd.DataFrame([["2026-07-22", "F1", "MAL", "6 ADET", 1000.0, 180.0]], columns=kols)
+    cikti = tmp_path / "c.docx"
+    YENI = "30.06.2026 Tarih ve 27 Sayılı Tam Tasdik Sözleşmesi"
+    exay.firma_docx_olustur(str(sablon), firma, str(cikti), kols, inceleme_dayanagi=YENI)
+    d = docx.Document(str(cikti))
+    bulundu = False
+    for tbl in d.tables:
+        for row in tbl.rows:
+            cs = row.cells
+            if cs and 'inceleme dayana' in exay._ascii_kucuk(cs[0].text):
+                assert cs[1].text.strip() == YENI          # değer güncellendi
+                assert 'inceleme dayana' in exay._ascii_kucuk(cs[0].text)  # etiket sabit
+                bulundu = True
+    assert bulundu
