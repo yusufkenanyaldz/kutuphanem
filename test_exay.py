@@ -591,3 +591,19 @@ def test_gercek_gib_basliklari_word_eslemesi():
     satir = exay._word_fatura_satiri(df.iloc[0], kols)
     assert satir == ["25.07.2026", "0012026165876119", "İLETİŞİM HİZMET BEDELİ",
                      "5 ADET", "1.208,34", "241,67", ""]
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  GUI kurulum dumanı — _ui() sahte pencereyle çalışır; eksik metot/callback
+#  bağlamaları (ör. bind command'ları) burada yakalanır (regresyon güvencesi).
+# ══════════════════════════════════════════════════════════════════════════
+def test_gui_kurulur_ve_callbackler_tanimli():
+    from unittest.mock import MagicMock
+    root = MagicMock(name="root")
+    app = exay.KDVBolmeApp(root)     # __init__ → _ui() çalışır; eksik metot patlar
+    # _ui / _surukle_birak içinde referans verilen tüm callback'ler tanımlı olmalı
+    for m in ["_tiklayarak_sec", "_isle", "_isle_coklu", "_batch_worker",
+              "_cikis_klasoru_sec", "_sablon_klasoru_sec", "_cikis_ozet",
+              "_sablon_ozet", "_kriter_al", "_ilerleme", "_tamam", "_log",
+              "_ayar_kaydet", "_birak_guncelle", "_dnd_ayikla"]:
+        assert callable(getattr(app, m)), f"Eksik/çağrılamaz metot: {m}"

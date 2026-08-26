@@ -9,7 +9,7 @@ ekran/GUI olmadan doğrudan çağrılıp test edilebilir.
 Gerçek bir tkinter kuruluysa ona dokunmayız (stub yalnızca eksikse devreye girer).
 """
 import sys
-import types
+from unittest.mock import MagicMock
 
 
 def _tkinter_stub_kur():
@@ -19,9 +19,13 @@ def _tkinter_stub_kur():
     except Exception:
         pass
 
-    tk = types.ModuleType('tkinter')
+    # tkinter'ı MagicMock ile taklit et: her widget/çağrı çocuk MagicMock döndürür.
+    # Böylece iş mantığı test edilebildiği gibi, KDVBolmeApp gerçek bir ekran
+    # olmadan sahte bir pencereyle KURULABİLİR de — _ui içindeki eksik metot/
+    # callback bağlamaları (ör. bind command'ları) testte hemen yakalanır.
+    tk = MagicMock(name='tkinter')
     for alt in ('ttk', 'messagebox', 'filedialog'):
-        m = types.ModuleType('tkinter.' + alt)
+        m = MagicMock(name='tkinter.' + alt)
         setattr(tk, alt, m)
         sys.modules['tkinter.' + alt] = m
     sys.modules['tkinter'] = tk
