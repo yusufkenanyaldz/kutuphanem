@@ -144,7 +144,9 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `sablonlari_indeksle` | Klasördeki `.doc` şablonları VKN→yol olarak indeksler (alt klasörler dahil). |
 | `firma_docx_olustur` / `docx_destekli` | `.docx` şablonu python-docx ile açıp fatura tablosunu doldurur, yeni `.docx` yazar (**Word gerektirmez**). |
 | `firma_word_olustur` / `word_destekli` | Eski `.doc` şablonu Word (COM) ile açıp fatura tablosunu günceller (Windows + Word). |
-| `firma_word_uret` / `sablon_uretilebilir_mi` | Uzantıya göre doğru üreticiyi seçer (.docx→python-docx, .doc→COM); ön koşulu denetler. |
+| `firma_word_uret` / `sablon_uretilebilir_mi` | Uzantıya göre doğru üreticiyi seçer (.docx→python-docx, .doc→COM); ön koşulu denetler. `inceleme_dayanagi` geçirir. |
+| `_docx_inceleme_dayanagi_yaz` | Tutanaktaki "İNCELEME DAYANAĞI" (sözleşme) değer hücresini günceller — eski şablonun eski yılını otomatik ezer. |
+| `_ascii_kucuk` | Türkçe-güvenli küçük harf/ASCII fold (İ→i). Anahtar-kelime eşleşmelerinde `.lower()` yerine bunu kullan. |
 | `_docx_metni_oku` | `.docx` metnini (paragraf + tablo hücreleri, sekmeli) çıkarır — VKN okuma için. |
 | `_word_fatura_satiri` / `_fatura_tablosu_mu` / `_tr_para_str` | Fatura satırını Word tablo sırasına çevirir; fatura tablosunu başlığından tanır; TR para biçimi. |
 | `_gecersizlik_nedeni` | Geçersiz VKN için insan-okur neden metni. |
@@ -247,6 +249,11 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - **Çıktı türü seçilebilir:** yalnız Excel / yalnız Word / ikisi. Word modları
   şablon klasörü ister. Şablonda tek satır olsa da firmanın tüm faturaları
   yazılır (veri satırları temizlenip her fatura için satır eklenir).
+- **İnceleme Dayanağı (sözleşme):** GUI'den girilirse her Word tutanağının
+  "İNCELEME DAYANAĞI" hücresi bununla ezilir — gözden kaçan eski yıl şablonları
+  bile güncel sözleşmeyle çıkar. Boşsa şablondaki yazı aynen kalır.
+- GUI ayarları artık **sekmeli** (Kriterler / Çıktı / Word Şablon) — büyüyen
+  seçenekler kalabalık yapmasın diye. Türkçe casing için `_ascii_kucuk` kullanılır.
 - PDF, GİB şablonuyla birebir değil; **okunur/arşiv** kopyasıdır (resmî dosya
   Excel). Türkçe için bir Unicode TTF (DejaVuSans/Arial) gerekir; yoksa
   Helvetica'ya düşer ve bazı Türkçe karakterler bozulabilir.
