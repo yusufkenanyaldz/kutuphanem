@@ -444,3 +444,125 @@ def test_cikis_kok_yonlendirme(tmp_path):
     # Çıktı kaynağın yanına DEĞİL, seçilen hedefe yazılmalı
     assert (hedef / "Hazır Tutanaklar").is_dir()
     assert not (kaynak / "Hazır Tutanaklar").exists()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  WORD ŞABLON EŞLEŞTİRME (VKN ile) — saf ayrıştırıcılar
+# ══════════════════════════════════════════════════════════════════════════
+def _tutanak_metni(unvan, vd_hucre):
+    """Gerçek tutanak düzenini (sekmeli hücreler) taklit eden sentetik metin."""
+    return (
+        "KATMA DEĞER VERGİSİ İADESİ KARŞIT İNCELEME TUTANAĞI\n"
+        "YEMİNLİ MALİ MÜŞAVİRİN\t\tAdı Soyadı\tSABRİ HAMAMCI\t\t"
+        "Vergi Dairesi ve Sicil No\tGAZİKENT V.D. / 464 100 8244\t\t"
+        "İADE TALEBİNDE BULUNAN FİRMANIN\t\tÜnvanı\tİNALOĞLU İNŞAAT\t\t"
+        "Vergi Dairesi/Nosu\tŞAHİNBEY / 475 056 9431\t\t"
+        "NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN\t\t"
+        f"Ünvanı\t{unvan}\t\tVergi Dairesi/Nosu\t{vd_hucre}\t\t"
+        "Adresi\tBİR ADRES\t\tİNCELEME DAYANAĞI\t31.01.2026 Tarih ve 09 Sayılı\n"
+        "Karşıt İncelemeye Konu Fatura ve Benzeri Belgeye ilişkin bilgiler:\n"
+    )
+
+
+def test_vkn_metinden_ayikla():
+    assert exay._vkn_metinden_ayikla("493 061 9102") == "4930619102"   # boşluklu
+    assert exay._vkn_metinden_ayikla("ASIM GÜNDÜZ V.D. – 30490690382") == "30490690382"
+    assert exay._vkn_metinden_ayikla("71419747") == "0071419747"       # 8 hane → zfill
+    assert exay._vkn_metinden_ayikla("0000000000") is None             # yer tutucu
+    assert exay._vkn_metinden_ayikla("yok") is None
+
+
+def test_sablon_vkn_metinden():
+    # 10 haneli VKN (boşluklu) doğru bloktan alınmalı, ünvan da
+    vkn, unvan = exay.sablon_vkn_metinden(
+        _tutanak_metni("MESAKO MADEN VE ENERJİ TİC. LTD. ŞTİ.", "ŞAHİNBEY V.D. 6190914983"))
+    assert vkn == "6190914983"
+    assert "MESAKO" in unvan
+    # 11 haneli TCKN + tire ile
+    vkn2, unvan2 = exay.sablon_vkn_metinden(
+        _tutanak_metni("ONUR FURKAN KARTA", "ASIM GÜNDÜZ V.D. – 30490690382"))
+    assert vkn2 == "30490690382"
+    assert unvan2 == "ONUR FURKAN KARTA"
+    # Blok yoksa (ör. üst yazı) → (None, None)
+    assert exay.sablon_vkn_metinden("Sayı: YMM 27103572 ... GAZİANTEP") == (None, None)
+
+
+def test_sablonlari_indeksle(tmp_path, monkeypatch):
+    metinler = {}
+    for ad, unvan, vkn in [("a.doc", "FIRMA A", "1234567890"),
+                           ("b.doc", "FIRMA B", "9876543210"),
+                           ("ustyazi.doc", None, None)]:
+        p = tmp_path / ad
+        p.write_bytes(b"stub")     # gerçek .doc gerekmez; okuma monkeypatch'li
+        if unvan:
+            metinler[str(p)] = _tutanak_metni(unvan, f"V.D. {vkn}")
+        else:
+            metinler[str(p)] = "Sayı: YMM 123 üst yazı"
+    monkeypatch.setattr(exay, "_doc_metni_oku", lambda p: metinler[str(p)])
+    idx = exay.sablonlari_indeksle(str(tmp_path))
+    assert idx["1234567890"].endswith("a.doc")
+    assert idx["9876543210"].endswith("b.doc")
+    assert len(idx) == 2               # üst yazı eşleşmez
+
+
+def test_fatura_tablosu_mu():
+    assert exay._fatura_tablosu_mu(["FATURANIN", "MALIN", "Tarihi", "Numarası",
+                                    "Cinsi", "Miktarı", "Tutarı", "KDV Tutarı"])
+    assert not exay._fatura_tablosu_mu(["Defterin Nevi", "Tasdik Makamı"])
+
+
+def test_word_fatura_satiri_ve_miktar():
+    df = pd.DataFrame({
+        "Alış Faturasının Tarihi": ["2026-04-01"],
+        "Alış Faturasının Sıra No'su": ["BBK1"],
+        "Alınan Mal ve/veya Hizmetin Cinsi": ["YEMEK BEDELİ"],
+        "Miktarı": ["4.880 ADET"],
+        "Alış Faturasının KDV Hariç Tutarı": [683200],
+        "KDV si": [68320],
+    })
+    hucre = exay._word_fatura_satiri(df.iloc[0], list(df.columns))
+    # [Tarih, No, Cinsi, Miktar, Tutar, KDV, DefterKayıt(boş)]
+    assert hucre[0] == "01.04.2026"
+    assert hucre[1] == "BBK1"
+    assert hucre[2] == "YEMEK BEDELİ"
+    assert hucre[3] == "4.880 ADET"          # miktar sütunu kullanıldı
+    assert hucre[4] == "683.200,00"          # TR biçim
+    assert hucre[5] == "68.320,00"
+    assert hucre[6] == ""                     # defter kayıt boş
+
+
+def test_tr_para_str():
+    assert exay._tr_para_str(683200) == "683.200,00"
+    assert exay._tr_para_str("1234567,89") == "1.234.567,89"
+    assert exay._tr_para_str("") == ""
+
+
+def test_word_com_yoksa_hata():
+    # Bu ortamda Word/pywin32 yok → firma_word_olustur RuntimeError vermeli
+    if exay.word_destekli():
+        pytest.skip("Word otomasyonu mevcut; negatif yol test edilemez")
+    df = pd.DataFrame({"Alış Faturasının Tarihi": ["2026-04-01"]})
+    with pytest.raises(RuntimeError):
+        exay.firma_word_olustur("yok.doc", df, "cikti.doc", list(df.columns))
+
+
+def test_dosyalari_isle_sablon_eslesme_raporu(tmp_path, monkeypatch):
+    """Şablon klasörü verildiğinde: eşleşme yapılır ve WORD_ESLESME raporu üretilir
+    (Word olmadan da). Eşleşme VKN ile olmalı."""
+    yol = tmp_path / "NISAN_2026.xlsx"
+    _yeni_gib_yaz(yol)     # FIRMA A=1000000001 (seçilir), FIRMA B=1000000002 (seçilir)
+    sablon_kl = tmp_path / "sablonlar"
+    sablon_kl.mkdir()
+    pa = sablon_kl / "firmaA.doc"; pa.write_bytes(b"stub")
+    metin = _tutanak_metni("FIRMA A", "V.D. 1000000001")   # yalnızca A'nın şablonu
+    monkeypatch.setattr(exay, "_doc_metni_oku",
+                        lambda p: metin if str(p) == str(pa) else "üst yazı")
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        sablon_klasor=str(sablon_kl))
+    rapor = list((tmp_path / "Hazır Tutanaklar").glob("WORD_ESLESME_*.xlsx"))
+    assert rapor, "Şablon eşleşme raporu üretilmedi"
+    wb = openpyxl.load_workbook(rapor[0]); ws = wb.active
+    satirlar = {ws.cell(r, 1).value: ws.cell(r, 3).value for r in range(2, ws.max_row + 1)}
+    assert "1000000001" in satirlar             # A eşleşti
+    assert "1000000002" in satirlar             # B şablonsuz
+    assert satirlar["1000000002"] == "Şablon yok"

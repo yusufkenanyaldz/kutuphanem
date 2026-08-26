@@ -105,6 +105,13 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 - `N) …_.pdf` — **opsiyonel** okunur PDF kopyası (yalnızca `reportlab` kuruluysa ve
   kullanıcı "PDF üret"i işaretlerse; `firma_pdf_olustur`). Resmî yükleme dosyası
   yine Excel'dir; PDF arşiv/imza kopyasıdır.
+- `N) …_.doc` — **opsiyonel** Word tutanağı: kullanıcının hazır `.doc` şablonları
+  **VKN ile eşleştirilip** ("NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN" bloğu)
+  yalnızca "Karşıt İncelemeye Konu Fatura" tablosu firmanın faturalarıyla
+  güncellenir. Diğer her şey sabit kalır. Yazma adımı **Windows + Word (pywin32
+  COM)** gerektirir; okuma/eşleştirme saf Python'dur (`olefile`).
+- `WORD_ESLESME_DÖNEM.xlsx` — hangi seçili firmanın şablonu var/yok ve Word
+  tutanağının üretilip üretilmediği (Word olmadan da çıkarılır).
 
 ---
 
@@ -129,11 +136,17 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `_ay_yil` / `donem_disi_tarih_kontrol` | Tarihleri tek-anlamlı ayrıştırır; dönem dışı fatura oranını verir (yanlış dönem dosyası uyarısı). |
 | `_csv_okuyucu_hazirla` | CSV/TXT için kodlama+ayraç saptar; read_excel ile aynı arayüzde okuyucu döndürür. |
 | `firma_pdf_olustur` / `pdf_destekli` / `_pdf_font_bul` | Opsiyonel PDF kopya (reportlab varsa; Türkçe için Unicode TTF kaydeder). |
+| `_doc_metni_oku` | Eski ikili `.doc`'un ana metnini çıkarır (olefile; WordDocument akışı UTF-16LE, 0x07→tab). Yalnızca okuma. |
+| `sablon_vkn_metinden` / `sablon_vkn_oku` | Tutanak metninden karşı firmanın (vkn, unvan) bilgisini "NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN" bloğundan çıkarır. |
+| `_vkn_metinden_ayikla` | Metinden 10-11 haneli VKN/TCKN (boşlukları temizler, 8-9→zfill, yer tutucu geçersiz) — filtreyle aynı normalize. |
+| `sablonlari_indeksle` | Klasördeki `.doc` şablonları VKN→yol olarak indeksler (alt klasörler dahil). |
+| `firma_word_olustur` / `word_destekli` | Eşleşen şablonu Word (COM) ile açıp fatura tablosunu günceller, yeni `.doc` yazar (Windows + Word). |
+| `_word_fatura_satiri` / `_fatura_tablosu_mu` / `_tr_para_str` | Fatura satırını Word tablo sırasına çevirir; fatura tablosunu başlığından tanır; TR para biçimi. |
 | `_gecersizlik_nedeni` | Geçersiz VKN için insan-okur neden metni. |
 | `firmalari_filtrele` | **KALP.** VKN normalize, geçerli/geçersiz ayrım, 2 aşamalı %80 seçimi. |
 | `guvenli_kaydet` | Windows uzun yol (~260) sorununda dosya adını kısaltarak yeniden kaydeder. |
 | `firma_excel_olustur` | Tek firmanın tutanak Excel'ini şablona göre yazar. |
-| `dosyalari_isle` | Orkestrasyon: oku → **ön bilgi + doğruluk uyarıları** → filtrele → her firma için üret → yan dosyalar + kalıcı günlük. Opsiyonel `ilerleme_cb`, `cikis_kok` (çıktı klasörü), `pdf_uret`. |
+| `dosyalari_isle` | Orkestrasyon: oku → **ön bilgi + doğruluk uyarıları** → filtrele → her firma için üret → yan dosyalar + kalıcı günlük. Opsiyonel `ilerleme_cb`, `cikis_kok`, `pdf_uret`, `sablon_klasor` (Word şablon eşleştirme). |
 | `KDVBolmeApp` | Tkinter GUI (sürükle-bırak **çoklu/toplu**, eşik alanları + **doğrulama**, çıktı klasörü seçimi, **PDF onayı**, ilerleme çubuğu, log kutusu, logo, ayarları hatırlama). |
 
 Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
@@ -144,8 +157,10 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 ## 7. Çalıştırma, bağımlılıklar, derleme
 
 - Python 3, bağımlılıklar: `pandas`, `openpyxl`, `xlrd` (eski `.xls` için),
-  `pillow` (logo). **Opsiyonel:** `reportlab` (PDF kopya — yoksa program çalışır,
-  sadece PDF üretmez). Tkinter standart kütüphanede. Testler için: `pytest`.
+  `pillow` (logo), `olefile` (hazır `.doc` şablonlardan VKN okuma). **Opsiyonel:**
+  `reportlab` (PDF kopya), `pywin32` (yalnızca Windows'ta Word `.doc` tutanak
+  üretimi — yoksa program çalışır, sadece o özellik devre dışı). Tkinter standart
+  kütüphanede. Testler için: `pytest`.
 - Kullanıcı ayarları (son eşik/yüzde, **çıktı klasörü, PDF tercihi**)
   `~/.exay_ayarlar.json` içinde saklanır (Program Files gibi yazılamayan
   konumlarda sorun çıkmasın diye).
@@ -227,3 +242,10 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - PDF, GİB şablonuyla birebir değil; **okunur/arşiv** kopyasıdır (resmî dosya
   Excel). Türkçe için bir Unicode TTF (DejaVuSans/Arial) gerekir; yoksa
   Helvetica'ya düşer ve bazı Türkçe karakterler bozulabilir.
+- **Word tutanak eşleştirme (yeni):** `.doc` şablon **okuma/VKN eşleştirme** saf
+  Python'dur ve gerçek 5 şablonda test edildi. Ama **yazma** adımı (fatura
+  tablosunu güncelleme) Windows'ta Word'ü COM ile sürer ve bu ortamda
+  çalıştırılıp doğrulanamadı — kullanıcı makinesinde test edilip tablonun sütun
+  sayısı/başlık satırı sayısına göre ince ayar gerekebilir (`firma_word_olustur`
+  loglu yazılmıştır). Miktar sütunu kaynak listeden alınır (`sutun_bul(['miktar'])`);
+  liste düzeni netleştikçe eşleme gözden geçirilmeli.
