@@ -151,8 +151,8 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `firmalari_filtrele` | **KALP.** VKN normalize, geçerli/geçersiz ayrım, 2 aşamalı %80 seçimi. |
 | `guvenli_kaydet` | Windows uzun yol (~260) sorununda dosya adını kısaltarak yeniden kaydeder. |
 | `firma_excel_olustur` | Tek firmanın tutanak Excel'ini şablona göre yazar. |
-| `dosyalari_isle` | Orkestrasyon: oku → **ön bilgi + doğruluk uyarıları** → filtrele → her firma için üret → yan dosyalar + kalıcı günlük. Opsiyonel `ilerleme_cb`, `cikis_kok`, `pdf_uret`, `sablon_klasor` (Word şablon eşleştirme). |
-| `KDVBolmeApp` | Tkinter GUI (sürükle-bırak **çoklu/toplu**, eşik alanları + **doğrulama**, çıktı klasörü seçimi, **PDF onayı**, ilerleme çubuğu, log kutusu, logo, ayarları hatırlama). |
+| `dosyalari_isle` | Orkestrasyon: oku → **ön bilgi + doğruluk uyarıları** → filtrele → her firma için üret → yan dosyalar + kalıcı günlük. Opsiyonel `ilerleme_cb`, `cikis_kok`, `pdf_uret`, `sablon_klasor`, **`cikti_turu`** ('excel'/'word'/'ikisi'). Ardışık numara yalnızca üretilen firmalar için. |
+| `KDVBolmeApp` | Tkinter GUI (sürükle-bırak **çoklu/toplu**, eşik + **doğrulama**, **çıktı türü seçici**, çıktı klasörü, PDF onayı, Word şablon klasörü, ilerleme çubuğu, log, logo, ayarları hatırlama). |
 
 Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 (her firma) `firma_excel_olustur` → `guvenli_kaydet`.
@@ -244,6 +244,9 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
   büyük olması hâlinde ara ilerleme gösterilmez (yeterince ince).
 - Doğruluk kontrolleri (KDV oranı, mükerrer, dönem) **uyarı** niteliğindedir;
   satır silmez / seçimi değiştirmez — kullanıcı kaynakta düzeltir.
+- **Çıktı türü seçilebilir:** yalnız Excel / yalnız Word / ikisi. Word modları
+  şablon klasörü ister. Şablonda tek satır olsa da firmanın tüm faturaları
+  yazılır (veri satırları temizlenip her fatura için satır eklenir).
 - PDF, GİB şablonuyla birebir değil; **okunur/arşiv** kopyasıdır (resmî dosya
   Excel). Türkçe için bir Unicode TTF (DejaVuSans/Arial) gerekir; yoksa
   Helvetica'ya düşer ve bazı Türkçe karakterler bozulabilir.

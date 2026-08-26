@@ -691,3 +691,50 @@ def test_dosyalari_isle_docx_word_uretir(tmp_path):
                         sablon_klasor=str(sk))
     uretilen = list((tmp_path / "Hazır Tutanaklar").glob("*.docx"))
     assert any("1000000001" in p.name for p in uretilen), "İSPA benzeri Word tutanağı üretilmedi"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Çıktı türü seçimi: yalnız Excel / yalnız Word / ikisi
+# ══════════════════════════════════════════════════════════════════════════
+def _liste_ve_sablon(tmp_path):
+    """FIRMA A (1000000001) seçilir; A için bir .docx şablon hazırlanır."""
+    yol = tmp_path / "NISAN_2026.xlsx"
+    _yeni_gib_yaz(yol)
+    sk = tmp_path / "sablonlar"; sk.mkdir()
+    _docx_sablon_yaz(sk / "firmaA.docx", "FIRMA A", "V.D. 1000000001")
+    return yol, sk
+
+
+def test_cikti_yalniz_excel(tmp_path):
+    yol, sk = _liste_ve_sablon(tmp_path)
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        sablon_klasor=str(sk), cikti_turu='excel')
+    kl = tmp_path / "Hazır Tutanaklar"
+    assert list(kl.glob("*.xlsx"))                       # Excel var
+    assert not list(kl.glob("*.docx"))                    # Word YOK
+    assert not list(kl.glob("WORD_ESLESME_*.xlsx"))       # eşleşme raporu bile yok
+
+
+def test_cikti_yalniz_word(tmp_path):
+    yol, sk = _liste_ve_sablon(tmp_path)
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        sablon_klasor=str(sk), cikti_turu='word')
+    kl = tmp_path / "Hazır Tutanaklar"
+    docx_ler = list(kl.glob("*.docx"))
+    # Firma tutanağı .docx üretilir; VKN listesi/özet .xlsx yan dosyaları hariç
+    # FİRMA tutanağı .xlsx OLMAMALI (numaralı 'N) …_.xlsx')
+    firma_xlsx = [p for p in kl.glob("*.xlsx")
+                  if p.name[0].isdigit() and ")" in p.name[:4]]
+    assert any("1000000001" in p.name for p in docx_ler)  # A için Word üretildi
+    assert not firma_xlsx                                  # firma Excel tutanağı YOK
+
+
+def test_cikti_ikisi(tmp_path):
+    yol, sk = _liste_ve_sablon(tmp_path)
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        sablon_klasor=str(sk), cikti_turu='ikisi')
+    kl = tmp_path / "Hazır Tutanaklar"
+    firma_xlsx = [p for p in kl.glob("*.xlsx")
+                  if p.name[0].isdigit() and ")" in p.name[:4]]
+    assert firma_xlsx                                      # Excel tutanakları var (A ve B)
+    assert any("1000000001" in p.name for p in kl.glob("*.docx"))  # A için Word da var

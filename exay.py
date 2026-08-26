@@ -1073,6 +1073,20 @@ def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
         except Exception:
             pass
 
+def _docx_hucre_yaz(cell, metin):
+    """Hücreye metni yazar; mevcut paragraf biçimini (hizalama/stil) ve varsa ilk
+    run'ın font biçimini KORUYARAK. Böylece şablonun hücre düzeni (ör. ortalı/sağa
+    dayalı, özel font) bozulmadan kalır. `cell.text = ...` bunları sıfırlardı."""
+    p = cell.paragraphs[0]
+    for extra in cell.paragraphs[1:]:      # tek paragraf kalsın
+        extra._p.getparent().remove(extra._p)
+    if p.runs:
+        p.runs[0].text = metin             # ilk run'ı kullan (font korunur)
+        for r in p.runs[1:]:
+            r._r.getparent().remove(r._r)
+    else:
+        p.add_run(metin)
+
 def firma_docx_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=None):
     """Modern .docx şablonunu python-docx ile açar, 'Karşıt İncelemeye Konu
     Fatura' tablosunun VERİ satırlarını firma faturalarıyla değiştirir ve
@@ -1130,7 +1144,7 @@ def firma_docx_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
             satir = hedef.add_row()
         for ci, cell in enumerate(satir.cells):
             if ci < len(hucreler):
-                cell.text = hucreler[ci]
+                _docx_hucre_yaz(cell, hucreler[ci])
         yazilan += 1
 
     os.makedirs(os.path.dirname(os.path.abspath(cikis_yol)), exist_ok=True)
@@ -1217,14 +1231,18 @@ def ozet_rapor_olustur(df, secilen, df_gecersiz, esik_tek, esik_toplam,
 # ══════════════════════════════════════════
 def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb,
                    ilerleme_cb=None, cikis_kok=None, pdf_uret=False,
-                   sablon_klasor=None):
+                   sablon_klasor=None, cikti_turu='ikisi'):
     # ilerleme_cb(tamamlanan, toplam): GUI ilerleme çubuğunu günceller.
     # None geçilirse (ör. başsız test) hiçbir şey yapmaz.
     # cikis_kok: çıktı klasörünün üst dizini (None → kaynak dosyanın yanı).
     # pdf_uret: her firma için Excel'in yanına okunur bir PDF kopyası da üret.
-    # sablon_klasor: hazır .doc Word şablonlarının klasörü. Verilirse seçilen
+    # sablon_klasor: hazır .doc/.docx Word şablonlarının klasörü. Verilirse seçilen
     #   firmalar VKN ile eşleştirilir ve eşleşen şablonun fatura tablosu
-    #   güncellenerek Word tutanağı da üretilir (Windows + Word gerekir).
+    #   güncellenerek Word tutanağı da üretilir.
+    # cikti_turu: 'excel' (yalnız Excel), 'word' (yalnız Word — şablon gerekir),
+    #   'ikisi' (Excel + eşleşen firmalar için Word). Varsayılan 'ikisi'.
+    excel_iste = cikti_turu in ('excel', 'ikisi')
+    word_iste  = cikti_turu in ('word', 'ikisi') and bool(sablon_klasor)
     def _ilerle(t, top):
         if ilerleme_cb:
             try: ilerleme_cb(t, top)
@@ -1319,9 +1337,17 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
         if pdf_uret:
             log_cb("  🧾 PDF kopyalar da üretilecek.", "info")
 
-        # ── Word şablonları: klasör verildiyse VKN'ye göre indeksle ──
+        # Çıktı türünü bildir
+        _mod = {'excel': 'yalnız Excel', 'word': 'yalnız Word',
+                'ikisi': 'Excel + (eşleşen firmalar için) Word'}.get(cikti_turu, 'Excel + Word')
+        log_cb(f"🧾 Çıktı türü: {_mod}", "info")
+        if cikti_turu == 'word' and not sablon_klasor:
+            log_cb("  ⚠️  'Yalnız Word' seçildi ama şablon klasörü seçilmedi — "
+                   "hiçbir tutanak üretilemeyecek. Lütfen şablon klasörünü seçin.", "err")
+
+        # ── Word şablonları: gerekiyorsa VKN'ye göre indeksle ──
         sablon_index = {}
-        if sablon_klasor:
+        if word_iste:
             log_cb(f"🗂  Word şablonları taranıyor: {sablon_klasor}", "info")
             try:
                 sablon_index = sablonlari_indeksle(sablon_klasor, log_cb)
@@ -1360,51 +1386,64 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                 fdiz = grp[fno_col].dropna()
                 if len(fdiz):
                     ornek_fno = str(fdiz.iloc[0]).strip()
-            sira_no += 1
-            try:
-                temiz = dosya_adi_temizle(unvan) if unvan else vkn
-                ad    = f"{sira_no}) {donem.replace('.','_')}_{vkn}_{temiz}.xlsx"
-                dosya = str(cikis_kl / ad)
-                kayitli_yol = firma_excel_olustur(grp, dosya, list(df.columns))
+            temiz = dosya_adi_temizle(unvan) if unvan else vkn
+            sira_no += 1              # aday numara; hiçbir çıktı üretilmezse geri alınır
+            uretildi = False          # bu firma için en az bir dosya üretildi mi?
+            hata_mesaji = None        # Excel/Word üretim hatası (varsa)
+
+            # ── Excel tutanağı ──
+            if excel_iste:
+                try:
+                    ad = f"{sira_no}) {donem.replace('.','_')}_{vkn}_{temiz}.xlsx"
+                    kayitli_yol = firma_excel_olustur(grp, str(cikis_kl / ad), list(df.columns))
+                    uretildi = True
+                    if pdf_uret:      # PDF, Excel'in okunur kopyası — hata Excel'i etkilemez
+                        try:
+                            firma_pdf_olustur(grp, str(Path(kayitli_yol).with_suffix('.pdf')),
+                                              list(df.columns), vkn=vkn, unvan=unvan, donem=donem)
+                        except Exception as pe:
+                            log_cb(f"      ⚠️ PDF üretilemedi ({vkn}): {pe}", "warn")
+                except Exception as e:
+                    hata_mesaji = str(e)
+
+            # ── Word tutanağı (VKN ile eşleşen şablondan) ──
+            if word_iste:
+                sy = sablon_index.get(vkn)
+                if sy:
+                    word_eslesen.append((vkn, unvan))
+                    if sablon_uretilebilir_mi(sy):
+                        try:
+                            firma_word_uret(sy, grp, cikis_kl, sira_no, donem,
+                                            vkn, temiz, list(df.columns), log_cb)
+                            word_uretilen.append(vkn)
+                            uretildi = True
+                        except Exception as we:
+                            log_cb(f"      ⚠️ Word tutanağı üretilemedi ({vkn}): {we}", "warn")
+                            if not excel_iste and hata_mesaji is None:
+                                hata_mesaji = str(we)
+                else:
+                    word_sablonsuz.append((vkn, unvan))
+
+            # ── Sonuç: ardışık numaralandırma yalnızca üretilen firmalar için ──
+            if uretildi:
                 basarili += 1
                 vkn_sirali.append((sira_no, vkn, unvan, ornek_fno))
                 log_cb(f"  [{sira_no:3}/{len(secilen)}] ✔ {vkn}  {unvan[:35]}", "ok")
-                # PDF kopya (opsiyonel) — hata olursa Excel'i etkilemez, sadece uyarır
-                if pdf_uret:
-                    try:
-                        pdf_yol = str(Path(kayitli_yol).with_suffix('.pdf'))
-                        firma_pdf_olustur(grp, pdf_yol, list(df.columns),
-                                          vkn=vkn, unvan=unvan, donem=donem)
-                    except Exception as pe:
-                        log_cb(f"      ⚠️ PDF üretilemedi ({vkn}): {pe}", "warn")
-                # Word şablon eşleştirme (VKN ile) — opsiyonel, Excel'i etkilemez.
-                # .docx şablonlar Word'süz (python-docx), .doc şablonlar Word COM ile.
-                if sablon_klasor:
-                    sy = sablon_index.get(vkn)
-                    if sy:
-                        word_eslesen.append((vkn, unvan))
-                        if sablon_uretilebilir_mi(sy):
-                            try:
-                                firma_word_uret(sy, grp, cikis_kl, sira_no, donem,
-                                                vkn, temiz, list(df.columns), log_cb)
-                                word_uretilen.append(vkn)
-                            except Exception as we:
-                                log_cb(f"      ⚠️ Word tutanağı üretilemedi ({vkn}): {we}", "warn")
-                    else:
-                        word_sablonsuz.append((vkn, unvan))
-            except Exception as e:
-                sira_no -= 1   # başarısız → numarayı geri al ki sonraki dosyada atlama olmasın
-                hatali.append((vkn, unvan, str(e)))
-                log_cb(f"  ✘ HATA  {vkn}  {unvan[:30]}: {e}", "err")
-            finally:
-                _ilerle(islenen, toplam_firma)
+                if hata_mesaji:       # kısmi: Word üretildi ama Excel üretilemedi
+                    log_cb(f"      ⚠️ Excel üretilemedi ({vkn}): {hata_mesaji}", "warn")
+            else:
+                sira_no -= 1          # üretilmedi → numarayı geri al (atlama olmasın)
+                if hata_mesaji:
+                    hatali.append((vkn, unvan, hata_mesaji))
+                    log_cb(f"  ✘ HATA  {vkn}  {unvan[:30]}: {hata_mesaji}", "err")
+            _ilerle(islenen, toplam_firma)
 
         log_cb(f"\n{'═'*50}", "info")
         log_cb(f"✅ {basarili}/{len(secilen)} firma tamamlandı."
                + (f"  ⚠️ {len(hatali)} firma oluşturulamadı!" if hatali else ""), "ok")
 
         # ── Word şablon eşleşme özeti + raporu ──
-        if sablon_klasor:
+        if word_iste:
             log_cb(f"🗂  Şablon eşleşmesi: {len(word_eslesen)} firma eşleşti, "
                    f"{len(word_uretilen)} Word tutanağı üretildi"
                    + (f"; {len(word_sablonsuz)} firmanın şablonu yok."
@@ -1573,7 +1612,8 @@ class KDVBolmeApp:
         self._cikis_kok  = ayar.get("cikis_kok") or None   # çıktı klasörü (None → kaynağın yanı)
         self.pdf_uret    = tk.BooleanVar(value=bool(ayar.get("pdf_uret", False)))
         self._sablon_klasor = ayar.get("sablon_klasor") or None  # Word şablon klasörü
-        self.word_uret   = tk.BooleanVar(value=bool(ayar.get("word_uret", False)))
+        # Çıktı türü: 'excel' | 'word' | 'ikisi'
+        self.cikti_turu  = tk.StringVar(value=ayar.get("cikti_turu", "excel"))
 
         self._ui()
         self._surukle_birak()
@@ -1600,7 +1640,7 @@ class KDVBolmeApp:
                     "cikis_kok":   self._cikis_kok or "",
                     "pdf_uret":    bool(self.pdf_uret.get()),
                     "sablon_klasor": self._sablon_klasor or "",
-                    "word_uret":   bool(self.word_uret.get()),
+                    "cikti_turu":  self.cikti_turu.get(),
                 }, f, ensure_ascii=False)
         except Exception:
             pass
@@ -1645,6 +1685,17 @@ class KDVBolmeApp:
                            bg=APP, fg=KOYU, relief='solid', bd=1,
                            padx=10, pady=6)
         sf.pack(fill='x', pady=(0,10))
+
+        # Çıktı türü: yalnız Excel / yalnız Word / ikisi
+        tk.Label(sf, text="Çıktı türü:", font=F_KUC, bg=APP, fg=KOYU,
+                 anchor='w').pack(fill='x')
+        rf = tk.Frame(sf, bg=APP); rf.pack(fill='x', pady=(0,2))
+        for etiket, deger in [("Excel", "excel"), ("Word", "word"), ("İkisi", "ikisi")]:
+            tk.Radiobutton(rf, text=etiket, value=deger, variable=self.cikti_turu,
+                           font=F_KUC, bg=APP, fg=KOYU, activebackground=APP,
+                           selectcolor=KART, command=self._ayar_kaydet).pack(side='left', padx=(0,10))
+        tk.Frame(sf, bg='#E2E8F0', height=1).pack(fill='x', pady=6)
+
         tk.Checkbutton(sf, text="Excel'in yanına PDF kopya da üret",
                        variable=self.pdf_uret, onvalue=True, offvalue=False,
                        font=F_KUC, bg=APP, fg=KOYU, activebackground=APP,
@@ -1657,12 +1708,10 @@ class KDVBolmeApp:
                                   bg=APP, fg=GRI, anchor='w')
         self.cikis_lbl.pack(side='left', padx=(6,0), fill='x', expand=True)
 
-        # Word şablonları (VKN ile eşleştirme)
+        # Word şablonları (VKN ile eşleştirme) — 'Word' veya 'İkisi' seçilince kullanılır
         tk.Frame(sf, bg='#E2E8F0', height=1).pack(fill='x', pady=6)
-        tk.Checkbutton(sf, text="Eşleşen VKN için Word tutanağı da üret",
-                       variable=self.word_uret, onvalue=True, offvalue=False,
-                       font=F_KUC, bg=APP, fg=KOYU, activebackground=APP,
-                       anchor='w', command=self._ayar_kaydet).pack(fill='x')
+        tk.Label(sf, text="Word/İkisi için hazır şablon klasörü:",
+                 font=F_KUC, bg=APP, fg=KOYU, anchor='w').pack(fill='x')
         wf = tk.Frame(sf, bg=APP); wf.pack(fill='x', pady=(4,0))
         tk.Button(wf, text="Şablon klasörü…", font=('Segoe UI',8),
                   bg=KART, fg=KOYU, relief='solid', bd=1,
@@ -1816,15 +1865,15 @@ class KDVBolmeApp:
 
     def _sablon_klasoru_sec(self):
         d = filedialog.askdirectory(
-            title="Hazır Word (.doc) şablonlarının bulunduğu klasörü seçin")
+            title="Hazır Word (.doc/.docx) şablonlarının bulunduğu klasörü seçin")
         self._sablon_klasor = d or None
         try:
             self.sablon_lbl.config(text=self._sablon_ozet())
         except Exception:
             pass
-        # Klasör seçildiyse özelliği otomatik aç
-        if self._sablon_klasor:
-            self.word_uret.set(True)
+        # Klasör seçildi ama çıktı 'yalnız Excel' ise, Word'ü de üretsin diye 'İkisi'ye al
+        if self._sablon_klasor and self.cikti_turu.get() == 'excel':
+            self.cikti_turu.set('ikisi')
         self._ayar_kaydet()
 
     def _kriter_al(self):
@@ -1864,7 +1913,19 @@ class KDVBolmeApp:
             return
         esik_tek, esik_toplam, yuzde80 = kriter
         pdf_uret = bool(self.pdf_uret.get())   # ana thread'de oku, worker'a geçir
-        sablon_klasor = self._sablon_klasor if self.word_uret.get() else None
+        cikti_turu = self.cikti_turu.get()
+        # Word gereken modda şablon klasörü şart; yoksa kullanıcıyı uyar
+        sablon_klasor = self._sablon_klasor if cikti_turu in ('word', 'ikisi') else None
+        if cikti_turu in ('word', 'ikisi') and not sablon_klasor:
+            if cikti_turu == 'word':
+                messagebox.showerror(
+                    "Şablon klasörü gerekli",
+                    "'Yalnız Word' seçtiniz ama şablon klasörü seçmediniz.\n"
+                    "Lütfen 'Şablon klasörü…' ile hazır .doc/.docx şablonların "
+                    "bulunduğu klasörü seçin.")
+                return
+            self._log("⚠️ 'İkisi' seçili ama şablon klasörü yok; yalnızca Excel "
+                      "üretilecek.", "warn")
         self._ayar_kaydet()
 
         self._isleniyor = True
@@ -1876,12 +1937,13 @@ class KDVBolmeApp:
 
         threading.Thread(
             target=self._batch_worker,
-            args=(gecerli, esik_tek, esik_toplam, yuzde80, pdf_uret, sablon_klasor),
+            args=(gecerli, esik_tek, esik_toplam, yuzde80, pdf_uret, sablon_klasor,
+                  cikti_turu),
             daemon=True
         ).start()
 
     def _batch_worker(self, dosyalar, esik_tek, esik_toplam, yuzde80, pdf_uret,
-                      sablon_klasor=None):
+                      sablon_klasor=None, cikti_turu='ikisi'):
         toplam_b = 0; toplam_h = 0; son_klasor = None
         n = len(dosyalar)
         for i, dosya in enumerate(dosyalar, 1):
@@ -1894,7 +1956,7 @@ class KDVBolmeApp:
             try:
                 dosyalari_isle(dosya, esik_tek, esik_toplam, yuzde80,
                                self._log, _tamam_ic, self._ilerleme,
-                               self._cikis_kok, pdf_uret, sablon_klasor)
+                               self._cikis_kok, pdf_uret, sablon_klasor, cikti_turu)
             except Exception as e:
                 self._log(f"❌ {e}", "err")
             toplam_b += sonuc.get('b', 0); toplam_h += sonuc.get('h', 0)
