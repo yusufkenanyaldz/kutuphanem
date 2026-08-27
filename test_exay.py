@@ -690,7 +690,8 @@ def test_dosyalari_isle_docx_word_uretir(tmp_path):
     exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
                         sablon_klasor=str(sk))
     uretilen = list((tmp_path / "Hazır Tutanaklar").glob("*.docx"))
-    assert any("1000000001" in p.name for p in uretilen), "İSPA benzeri Word tutanağı üretilmedi"
+    assert any("FIRMA A" in p.name for p in uretilen), "İSPA benzeri Word tutanağı üretilmedi"
+    assert not any("1000000001" in p.name for p in uretilen), "Word adında VKN olmamalı"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -725,7 +726,7 @@ def test_cikti_yalniz_word(tmp_path):
     # FİRMA tutanağı .xlsx OLMAMALI (numaralı 'N) …_.xlsx')
     firma_xlsx = [p for p in kl.glob("*.xlsx")
                   if p.name[0].isdigit() and ")" in p.name[:4]]
-    assert any("1000000001" in p.name for p in docx_ler)  # A için Word üretildi
+    assert any("FIRMA A" in p.name for p in docx_ler)     # A için Word üretildi (ünvan+dönem adı)
     assert not firma_xlsx                                  # firma Excel tutanağı YOK
 
 
@@ -737,7 +738,7 @@ def test_cikti_ikisi(tmp_path):
     firma_xlsx = [p for p in kl.glob("*.xlsx")
                   if p.name[0].isdigit() and ")" in p.name[:4]]
     assert firma_xlsx                                      # Excel tutanakları var (A ve B)
-    assert any("1000000001" in p.name for p in kl.glob("*.docx"))  # A için Word da var
+    assert any("FIRMA A" in p.name for p in kl.glob("*.docx"))     # A için Word da var
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -846,8 +847,8 @@ def test_docx_coklu_uctan_uca(tmp_path):
     exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
                         sablon_klasor=str(sk), cikti_turu='word')
     uretilen = sorted(p.name for p in (tmp_path / "Hazır Tutanaklar").glob("*.docx"))
-    assert any("1000000001" in n for n in uretilen)   # A tek dosyadan bulundu
-    assert any("1000000002" in n for n in uretilen)   # B tek dosyadan bulundu
+    assert any("FIRMA A" in n for n in uretilen)      # A tek dosyadan bulundu
+    assert any("FIRMA B" in n for n in uretilen)      # B tek dosyadan bulundu
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -884,7 +885,7 @@ def test_bos_sablon_eslesmeyen_firma(tmp_path):
                         sablon_klasor=str(sk), cikti_turu='word', bos_sablon=str(bos))
     kl = tmp_path / "Hazır Tutanaklar"
     # B için boş şablondan üretilmiş bir dosya olmalı
-    b_dosya = [p for p in kl.glob("*.docx") if "1000000002" in p.name]
+    b_dosya = [p for p in kl.glob("*.docx") if "FIRMA B" in p.name]
     assert b_dosya, "Boş şablondan B tutanağı üretilmedi"
     d = docx.Document(str(b_dosya[0]))
     metin = "\n".join("\t".join(c.text.strip() for c in r.cells)
@@ -1049,6 +1050,35 @@ def test_birlesik_ymm_yazi_bloklara_ayrilir(tmp_path):
     bloklar = exay._docx_firma_bloklari(d)
     assert len(bloklar) == 2
     assert all(b["vkn"] == "6120050961" for b in bloklar)
+
+
+def test_word_dosya_adi_ilk_uc_kelime_donem():
+    # Tutanak: ilk üç kelime + AA-YYYY (VKN yok, numara başta)
+    assert exay._word_tutanak_adi(
+        1, "İNNOVA MİMARLIK AHŞAP MOB. İNŞ. SAN. TİC. LTD", "07.2026", ".docx"
+    ) == "1) İNNOVA MİMARLIK AHŞAP 07-2026.docx"
+    # YMM yazısı: başına 'YMM '
+    assert exay._word_tutanak_adi(
+        1, "OYAK ÇİMENTO FABRİKALARI ANONİM ŞİRKETİ", "07.2026", ".docx", ymm=True
+    ) == "1) YMM OYAK ÇİMENTO FABRİKALARI 07-2026.docx"
+    # Boş şablon eki
+    assert exay._word_tutanak_adi(3, "X A.Ş.", "12.2025", ".docx", ek="BOŞ") \
+        == "3) X A.Ş. 12-2025 BOŞ.docx"
+    # İki kelimelik ünvan da sorunsuz
+    assert exay._ilk_uc_kelime("FIRMA A") == "FIRMA A"
+
+
+def test_word_adi_ymm_onek_uctan_uca(tmp_path):
+    """YMM yazısı şablonu eşleşen firmanın Word adı 'YMM ' ile başlamalı;
+    tutanak şablonununki başlamamalı."""
+    yol = tmp_path / "NISAN_2026.xlsx"
+    _yeni_gib_yaz(yol)                                    # FIRMA A = 1000000001
+    sk = tmp_path / "sablonlar"; sk.mkdir()
+    _ymm_yazi_docx_yaz(sk / "a_ymm.docx", "FIRMA A", "V.D. – 1000000001")
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        sablon_klasor=str(sk), cikti_turu='word')
+    adlar = [p.name for p in (tmp_path / "Hazır Tutanaklar").glob("*.docx")]
+    assert any(n.startswith("1) YMM FIRMA A") for n in adlar), adlar
 
 
 def test_ymm_yazi_sayi_basligi_silinmez(tmp_path):

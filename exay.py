@@ -1580,15 +1580,59 @@ def _sablon_yol_blok(sablon_kaydi):
         return str(yol), blok
     return str(sablon_kaydi), None
 
-def firma_word_uret(sablon_kaydi, firma_df, cikis_kl, sira_no, donem, vkn, temiz,
+def _ilk_uc_kelime(unvan):
+    """Ünvanın ilk üç kelimesini boşlukla birleştirir (ör. 'İNNOVA MİMARLIK AHŞAP
+    MOB. İNŞ...' → 'İNNOVA MİMARLIK AHŞAP'). Boşsa '' döner."""
+    kel = [k for k in re.sub(r'\s+', ' ', str(unvan or '').strip()).split(' ') if k]
+    return ' '.join(kel[:3])
+
+def _word_tutanak_adi(sira_no, unvan, donem, ext, ymm=False, ek=''):
+    """Word tutanağı/yazısı dosya adı: 'N) [YMM ]İLK ÜÇ KELİME AA-YYYY[ ek].ext'.
+    Kullanıcı isteği: karşıt inceleme tutanağı → firmanın ilk üç kelimesi + dönem;
+    YMM (Bilgi İsteme) yazısı → başına 'YMM '. Geçersiz dosya karakterleri sadelenir."""
+    ilk3 = _ilk_uc_kelime(unvan) or 'FIRMA'
+    d = re.sub(r'[._]', '-', str(donem))                 # 07.2026 / 07_2026 → 07-2026
+    on = 'YMM ' if ymm else ''
+    ham = f"{sira_no}) {on}{ilk3} {d}" + (f" {ek}" if ek else '')
+    ham = re.sub(r'[\\/*?:"<>|]', ' ', ham)              # geçersiz karakterler
+    return re.sub(r'\s+', ' ', ham).strip() + ext
+
+def _docx_belge_metni(doc):
+    """Açık bir docx.Document'in paragraf + tablo metnini döndürür (tip tespiti için)."""
+    parcalar = [p.text for p in doc.paragraphs]
+    for t in doc.tables:
+        for r in t.rows:
+            parcalar.append('\t'.join(c.text for c in r.cells))
+    return '\n'.join(parcalar)
+
+def _sablon_ymm_mi(yol, blok=None):
+    """Şablon YMM (Bilgi İsteme) YAZISI mı? ('Hakkında Bilgi İstenilen' geçiyorsa).
+    Değilse (karşıt inceleme tutanağı) veya okunamazsa False. Dosya adının başına
+    'YMM ' ön eki koyup koymamaya bu karar verir."""
+    try:
+        low = str(yol).lower()
+        if low.endswith('.docx'):
+            if blok is not None:
+                metin = _docx_belge_metni(_docx_blok_belgesi(yol, blok))
+            else:
+                metin = _docx_metni_oku(yol)
+        else:
+            metin = _doc_metni_oku(yol)
+    except Exception:
+        return False
+    return 'hakkinda bilgi istenilen' in _ascii_kucuk(metin)
+
+def firma_word_uret(sablon_kaydi, firma_df, cikis_kl, sira_no, donem, vkn, unvan,
                     tum_kolonlar, log_cb=None, inceleme_dayanagi=None):
     """Eşleşen şablondan firma tutanağı üretir; uzantıya göre doğru yöntemi seçer:
       .docx → python-docx (Word gerektirmez),  .doc → Word COM (Windows + Word).
     `sablon_kaydi` (yol, blok) olabilir: çok-firmalı .docx'te blok o firmanın
-    tutanak sayfasıdır. `inceleme_dayanagi` verilirse sözleşme alanı da güncellenir."""
+    tutanak sayfasıdır. Dosya adı firmanın ilk üç kelimesi + dönemdir; YMM yazısı
+    ise başına 'YMM ' gelir. `inceleme_dayanagi` verilirse sözleşme alanı güncellenir."""
     yol, blok = _sablon_yol_blok(sablon_kaydi)
     ext = Path(yol).suffix.lower()
-    ad = f"{sira_no}) {donem.replace('.','_')}_{vkn}_{temiz}{ext}"
+    ymm = _sablon_ymm_mi(yol, blok)
+    ad = _word_tutanak_adi(sira_no, unvan, donem, ext, ymm=ymm)
     cikis = str(Path(cikis_kl) / ad)
     if ext == '.docx':
         return firma_docx_olustur(yol, firma_df, cikis, tum_kolonlar, log_cb,
@@ -1870,7 +1914,7 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                                 word_bloklar.append((sira_no, vkn, unvan, d_))
                             else:
                                 firma_word_uret(sy, grp, cikis_kl, sira_no, donem,
-                                                vkn, temiz, list(df.columns), log_cb,
+                                                vkn, unvan, list(df.columns), log_cb,
                                                 inceleme_dayanagi=inceleme_dayanagi)
                             word_uretilen.append(vkn)
                             uretildi = True
@@ -1887,7 +1931,7 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                         if word_tek_dosya:
                             word_bloklar.append((sira_no, vkn, unvan, d_))
                         else:
-                            ad = f"{sira_no}) {donem.replace('.','_')}_{vkn}_{temiz}_BOS.docx"
+                            ad = _word_tutanak_adi(sira_no, unvan, donem, '.docx', ek='BOŞ')
                             _guvenli_docx_kaydet(d_, str(cikis_kl / ad))
                         bos_uretilen.append((vkn, unvan))
                         uretildi = True
