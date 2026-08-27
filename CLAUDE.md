@@ -255,6 +255,12 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - **İnceleme Dayanağı (sözleşme):** GUI'den girilirse her Word tutanağının
   "İNCELEME DAYANAĞI" hücresi bununla ezilir — gözden kaçan eski yıl şablonları
   bile güncel sözleşmeyle çıkar. Boşsa şablondaki yazı aynen kalır.
+- **Word dosya adı (Excel'den farklı):** Word tutanakları/yazıları
+  `N) [YMM ]İLK ÜÇ KELİME AA-YYYY.docx` biçiminde adlandırılır (`_word_tutanak_adi`):
+  firmanın ünvanının ilk üç kelimesi + dönem (`AA-YYYY`, tireli). YMM (Bilgi
+  İsteme) yazısında başına `YMM ` gelir (`_sablon_ymm_mi` ile tip tespiti). Boş
+  şablon çıktısında sona ` BOŞ` eklenir. **Excel adı değişmedi** (resmî GİB
+  dosyası hâlâ `N) DÖNEM_VKN_ÜNVAN.xlsx`). Ardışık `N)` numarası korunur.
 - **İki belge tipi (tutanak + YMM yazısı):** Şablonlar iki türdür — (a) *karşıt
   inceleme tutanağı* ("NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN", son sütun
   'Defter Kayıt') ve (b) *YMM Bilgi İsteme yazısı* ("Hakkında Bilgi İstenilen
