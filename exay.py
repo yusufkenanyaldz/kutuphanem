@@ -2089,6 +2089,7 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                 log_cb(f"⚠️  Rapor oluşturulamadı: {e}", "err")
 
         # ── Çalışma özeti (tek sayfalık kapsam raporu) ──
+        kapsam_pct = None
         try:
             ozet_wb, kapsam_pct = ozet_rapor_olustur(
                 df, secilen, df_gecersiz, esik_tek, esik_toplam,
@@ -2106,7 +2107,19 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
             log_cb(f"📝 İşlem günlüğü: {Path(gyol).name}", "ok")
 
         log_cb(f"📁 {cikis_kl}", "ok")
-        tamam_cb(str(cikis_kl), basarili, len(hatali))
+        # Özet metrikleri (GUI kartları için); 3-argümanlı eski geri çağrılarla uyumlu
+        ozet_metrik = {
+            'secilen':   len(secilen),
+            'uretilen':  basarili,
+            'dosya':     basarili,
+            'kapsam':    (round(kapsam_pct, 1) if kapsam_pct is not None else None),
+            'sablonsuz': len(word_sablonsuz),
+            'gecersiz':  int(len(df_gecersiz)) if df_gecersiz is not None else 0,
+        }
+        try:
+            tamam_cb(str(cikis_kl), basarili, len(hatali), ozet_metrik)
+        except TypeError:
+            tamam_cb(str(cikis_kl), basarili, len(hatali))
 
     except Exception as e:
         log_cb(f"\n❌ {e}", "err")
@@ -2120,10 +2133,17 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
 # ══════════════════════════════════════════
 #  GUI
 # ══════════════════════════════════════════
-APP="#F4F1F2"; KART="#FFFFFF"; KOYU="#241A1C"
-KIRMIZI="#A61C2B"; GRI="#7A6E70"; TURUNCU="#C2410C"
-ACCENT="#A61C2B"; ACCENT2="#851521"; KENAR="#E7DCDE"; BASLIK_BG="#6E1423"
-YESIL="#15803D"; LOG_BG="#1B1417"; SEKME_BG="#EBDEE0"
+# ── Tema: "sakin bordo" — tek aksan rengi bordo, gövde nötr ──
+# Tek yerden ayarlanır; ANA_RENK üst şerit/buton/slider/rozette kullanılır.
+ANA_RENK="#5E1030"; ANA_RENK2="#7A1540"     # koyu bordo + vurgu
+APP="#F7F5F2"; KART="#FFFFFF"; KENAR="#E3E0DA"   # nötr gövde, beyaz kart, ince kenar
+KOYU="#2C2C2A"; GRI="#6B6862"; IPUCU="#9A968D"   # metin: birincil / ikincil / ipucu
+YESIL="#1D7A4C"; UYARI="#9A6B0C"; HATA="#A32D2D" # durum renkleri
+LOG_BG="#20191C"                                  # log koyu zemin
+# Geriye dönük ad uyumu (eski kod bu adları kullanıyordu):
+ACCENT=ANA_RENK; ACCENT2=ANA_RENK2; BASLIK_BG=ANA_RENK
+KIRMIZI=ANA_RENK; TURUNCU=UYARI; SEKME_BG="#EFE7E3"
+PAD=14; GAP=12
 F_ANA=('Segoe UI',10); F_BLK=('Segoe UI',10,'bold')
 F_KUC=('Segoe UI',9);  F_BAS=('Segoe UI',13,'bold')
 F_CON=('Consolas',9)
@@ -2144,6 +2164,8 @@ class KDVBolmeApp:
             pass
         self._isleniyor = False
         self._logo_img  = None
+        self._secili_dosyalar = []   # OLUŞTUR ile işlenecek seçili dosyalar
+        self._log_acik = False       # işlem günlüğü açık mı
 
         # Son kullanılan kriterleri yükle (yoksa varsayılanlar)
         ayar = self._ayar_yukle()
@@ -2195,23 +2217,20 @@ class KDVBolmeApp:
             pass
 
     def _stil_kur(self):
-        """ttk temasını 'clam'a alıp düz/modern bir görünüm için renkleri ayarlar."""
+        """ttk temasını 'clam'a alıp "sakin bordo" için renkleri ayarlar."""
         try:
             st = ttk.Style()
             try: st.theme_use('clam')
             except Exception: pass
-            st.configure("TNotebook", background=APP, borderwidth=0, tabmargins=(2,4,2,0))
-            st.configure("TNotebook.Tab", background=SEKME_BG, foreground=GRI,
-                         font=('Segoe UI',9,'bold'), padding=(16,8), borderwidth=0)
-            st.map("TNotebook.Tab",
-                   background=[('selected', APP)],
-                   foreground=[('selected', ACCENT)])
             st.configure("TEntry", fieldbackground=KART, background=KART,
                          bordercolor=KENAR, lightcolor=KENAR, darkcolor=KENAR,
-                         relief='flat', padding=5)
+                         foreground=KOYU, relief='flat', padding=6)
             st.configure("Ymm.Horizontal.TProgressbar",
-                         troughcolor=KENAR, background=ACCENT, borderwidth=0, thickness=8)
-            st.configure("Vertical.TScrollbar", background="#8A6E72",
+                         troughcolor=KENAR, background=ANA_RENK, borderwidth=0, thickness=6)
+            # Kapsam % slider — bordo aksan
+            st.configure("Ymm.Horizontal.TScale", background=KART,
+                         troughcolor=KENAR, borderwidth=0)
+            st.configure("Vertical.TScrollbar", background="#7A6E72",
                          troughcolor=LOG_BG, borderwidth=0, arrowcolor="#E7DCDE")
         except Exception:
             pass
@@ -2230,183 +2249,313 @@ class KDVBolmeApp:
         b.bind('<Leave>', lambda e: b.config(bg=bg))
         return b
 
+    # ── "Kart" görünümü: beyaz zemin + ince kenar + başlık ──
+    def _kart(self, parent, baslik):
+        dis = tk.Frame(parent, bg=KART, highlightbackground=KENAR,
+                       highlightcolor=KENAR, highlightthickness=1)
+        ic = tk.Frame(dis, bg=KART); ic.pack(fill='both', expand=True, padx=14, pady=(11,14))
+        tk.Label(ic, text=baslik, bg=KART, fg=ANA_RENK,
+                 font=('Segoe UI',10,'bold')).pack(anchor='w', pady=(0,8))
+        return dis, ic
+
+    def _limit_kutu(self, parent, etiket, var, col):
+        f = tk.Frame(parent, bg=KART); f.grid(row=0, column=col, sticky='ew', padx=(0 if col == 0 else 8, 0))
+        parent.columnconfigure(col, weight=1, uniform='lim')
+        tk.Label(f, text=etiket, bg=KART, fg=GRI, font=('Segoe UI',8), anchor='w').pack(fill='x')
+        ttk.Entry(f, textvariable=var, font=F_ANA).pack(fill='x', pady=(2,0))
+
+    def _metrik_kart(self, parent, baslik, col):
+        d = tk.Frame(parent, bg=KART, highlightbackground=KENAR, highlightthickness=1)
+        d.grid(row=0, column=col, sticky='nsew', padx=(0 if col == 0 else GAP, 0))
+        parent.columnconfigure(col, weight=1, uniform='m')
+        deg = tk.Label(d, text="—", bg=KART, fg=ANA_RENK, font=('Segoe UI',18,'bold'))
+        deg.pack(pady=(12,0))
+        tk.Label(d, text=baslik, bg=KART, fg=GRI, font=('Segoe UI',8)).pack(pady=(0,12))
+        return deg
+
     def _ui(self):
         self._stil_kur()
 
-        # ── Üst başlık şeridi ──
-        hdr = tk.Frame(self.root, bg=BASLIK_BG, height=62)
+        # ── Üst şerit (ince, bordo) ──
+        hdr = tk.Frame(self.root, bg=ANA_RENK, height=46)
         hdr.pack(side='top', fill='x'); hdr.pack_propagate(False)
-        mono = tk.Canvas(hdr, width=40, height=40, bg=BASLIK_BG, highlightthickness=0)
-        mono.create_oval(2, 2, 38, 38, fill='#F6EFE0', outline='#E3C77A', width=2)
-        mono.create_text(20, 21, text="YMM", fill=BASLIK_BG, font=('Segoe UI',9,'bold'))
-        mono.pack(side='left', padx=(18,12), pady=11)
-        bsol = tk.Frame(hdr, bg=BASLIK_BG); bsol.pack(side='left', pady=(12,0), anchor='w')
-        tk.Label(bsol, text="Karşıt İnceleme Asistanı", bg=BASLIK_BG, fg='white',
-                 font=('Segoe UI',14,'bold')).pack(anchor='w')
-        tk.Label(bsol, text=f"e-YMM  ·  Sürüm {SURUM}", bg=BASLIK_BG, fg='#E4B8BE',
-                 font=('Segoe UI',8)).pack(anchor='w')
+        mono = tk.Canvas(hdr, width=30, height=30, bg=ANA_RENK, highlightthickness=0)
+        mono.create_oval(2, 2, 28, 28, fill='#F6EFE0', outline='#E3C77A', width=2)
+        mono.create_text(15, 16, text="YMM", fill=ANA_RENK, font=('Segoe UI',7,'bold'))
+        mono.pack(side='left', padx=(16,10), pady=8)
+        tk.Label(hdr, text="Karşıt İnceleme Asistanı", bg=ANA_RENK, fg='white',
+                 font=('Segoe UI',12,'bold')).pack(side='left', pady=11)
+        tk.Label(hdr, text=f"Sürüm {SURUM}", bg=ANA_RENK, fg='#E7C9D2',
+                 font=('Segoe UI',9)).pack(side='right', padx=16)
 
-        # ── Sol panel (ayarlar) ──
-        sol = tk.Frame(self.root, bg=APP, width=344)
-        sol.pack(side='left', fill='y', padx=(14,8), pady=14)
-        sol.pack_propagate(False)
-        self.sol = sol
+        # ── Ana dikey akış ──
+        main = tk.Frame(self.root, bg=APP)
+        main.pack(fill='both', expand=True, padx=PAD, pady=PAD)
+        self.sol = main   # _logo_yukle geriye dönük uyum
 
-        # ── Ayar sekmeleri (Kriterler / Çıktı / Word Şablon) ──
-        nb = ttk.Notebook(sol)
-        nb.pack(fill='x', pady=(0,12))
+        # ① Bırak alanı (akışın ilk adımı, en üstte)
+        self.birak = tk.Frame(main, bg=KART, cursor='hand2',
+                              highlightbackground=ANA_RENK, highlightcolor=ANA_RENK,
+                              highlightthickness=2)
+        self.birak.pack(fill='x')
+        self.birak_ikon = tk.Label(self.birak, text="📥", font=('Segoe UI',26),
+                                   bg=KART, fg=ANA_RENK)
+        self.birak_ikon.pack(pady=(14,2))
+        self.birak_yazi = tk.Label(self.birak, text="Listeyi buraya bırakın",
+                                   font=('Segoe UI',12,'bold'), bg=KART, fg=KOYU)
+        self.birak_yazi.pack()
+        self.birak_alt = tk.Label(self.birak,
+                                  text="ya da tıklayarak seçin · Excel, CSV, TXT (çoklu)",
+                                  font=F_KUC, bg=KART, fg=GRI)
+        self.birak_alt.pack(pady=(0,14))
+        for w in (self.birak, self.birak_ikon, self.birak_yazi, self.birak_alt):
+            w.bind('<Button-1>', self._tiklayarak_sec)
 
-        # — Sekme 1: Kriterler —
-        t1 = tk.Frame(nb, bg=APP, padx=10, pady=10); nb.add(t1, text="Kriterler")
-        self._esik_satir(t1, "Tek fatura limiti (₺):", self.esik_tek, "ör: 150000")
-        self._esik_satir(t1, "Toplam fatura limiti (₺):", self.esik_toplam, "ör: 450000")
-        self._esik_satir(t1, "Kapsam yüzdesi (%):", self.yuzde80, "ör: 80")
-        tk.Label(t1, text="Tek fatura ≥ limit  VEYA  toplam ≥ limit; yetmezse\n"
-                          "büyükten küçüğe ekleyerek % karşılanana dek devam eder.",
-                 font=('Segoe UI',8), bg=APP, fg=GRI, justify='left',
-                 wraplength=300).pack(fill='x', pady=(8,0))
+        # ② + ③ yan yana iki kart
+        kartlar = tk.Frame(main, bg=APP); kartlar.pack(fill='x', pady=(GAP,0))
+        kartlar.columnconfigure(0, weight=1, uniform='c')
+        kartlar.columnconfigure(1, weight=1, uniform='c')
+        kd, ki = self._kart(kartlar, "Kriterler")
+        kd.grid(row=0, column=0, sticky='nsew', padx=(0,GAP//2))
+        cd, ci = self._kart(kartlar, "Çıktı")
+        cd.grid(row=0, column=1, sticky='nsew', padx=(GAP//2,0))
 
-        # — Sekme 2: Çıktı —
-        t2 = tk.Frame(nb, bg=APP, padx=10, pady=10); nb.add(t2, text="Çıktı")
-        tk.Label(t2, text="Ne üretilsin?", font=F_KUC, bg=APP, fg=KOYU,
-                 anchor='w').pack(fill='x')
-        rf = tk.Frame(t2, bg=APP); rf.pack(fill='x', pady=(2,8))
-        for etiket, deger in [("Excel", "excel"), ("Word", "word"), ("İkisi", "ikisi")]:
-            tk.Radiobutton(rf, text=etiket, value=deger, variable=self.cikti_turu,
-                           font=F_KUC, bg=APP, fg=KOYU, activebackground=APP,
-                           selectcolor=KART, command=self._ayar_kaydet).pack(side='left', padx=(0,14))
-        tk.Checkbutton(t2, text="Excel'in yanına PDF kopya da üret",
+        # ② Kriterler
+        lim = tk.Frame(ki, bg=KART); lim.pack(fill='x')
+        self._limit_kutu(lim, "Tek fatura (₺)", self.esik_tek, 0)
+        self._limit_kutu(lim, "Toplam (₺)", self.esik_toplam, 1)
+        tk.Label(ki, text="Kapsam yüzdesi", bg=KART, fg=GRI,
+                 font=('Segoe UI',8), anchor='w').pack(fill='x', pady=(10,0))
+        sf = tk.Frame(ki, bg=KART); sf.pack(fill='x')
+        try:
+            ilk = int(float(str(self.yuzde80.get()).replace(',', '.')))
+        except Exception:
+            ilk = 80
+        self.kapsam_scale = tk.Scale(
+            sf, from_=50, to=100, orient='horizontal', showvalue=False,
+            command=self._kapsam_kaydir, bg=KART, fg=KOYU, troughcolor=KENAR,
+            highlightthickness=0, bd=0, sliderrelief='flat',
+            activebackground=ANA_RENK2, sliderlength=18, length=120)
+        try: self.kapsam_scale.set(ilk)
+        except Exception: pass
+        self.kapsam_scale.pack(side='left', fill='x', expand=True)
+        self.kapsam_lbl = tk.Label(sf, text=f"%{ilk}", bg=KART, fg=ANA_RENK,
+                                   font=('Segoe UI',11,'bold'), width=5)
+        self.kapsam_lbl.pack(side='left', padx=(8,0))
+        tk.Label(ki, text="Tek ≥ limit VEYA toplam ≥ limit; yetmezse büyükten "
+                          "küçüğe % dolana dek eklenir.",
+                 bg=KART, fg=GRI, font=('Segoe UI',8), justify='left',
+                 wraplength=250).pack(anchor='w', pady=(8,0))
+
+        # ③ Çıktı
+        tk.Label(ci, text="Ne üretilsin?", bg=KART, fg=KOYU,
+                 font=F_KUC, anchor='w').pack(fill='x')
+        seg = tk.Frame(ci, bg=KENAR); seg.pack(fill='x', pady=(4,8))
+        self._seg_btn = {}
+        for etiket, deger in [("Excel","excel"), ("Word","word"), ("İkisi","ikisi")]:
+            b = tk.Label(seg, text=etiket, font=F_KUC, padx=8, pady=6, cursor='hand2')
+            b.pack(side='left', fill='x', expand=True, padx=1, pady=1)
+            b.bind('<Button-1>', lambda e, d=deger: self._segment_sec(d))
+            self._seg_btn[deger] = b
+        self._segment_yenile()
+        tk.Checkbutton(ci, text="Excel'in yanına PDF kopya",
                        variable=self.pdf_uret, onvalue=True, offvalue=False,
-                       font=F_KUC, bg=APP, fg=KOYU, activebackground=APP,
-                       anchor='w', command=self._ayar_kaydet).pack(fill='x', pady=(0,6))
-        cf = tk.Frame(t2, bg=APP); cf.pack(fill='x')
+                       bg=KART, fg=KOYU, activebackground=KART, selectcolor=KART,
+                       font=F_KUC, anchor='w', command=self._ayar_kaydet).pack(fill='x')
+        cf = tk.Frame(ci, bg=KART); cf.pack(fill='x', pady=(4,0))
         self._buton(cf, "Çıktı klasörü…", self._cikis_klasoru_sec).pack(side='left')
         self.cikis_lbl = tk.Label(cf, text=self._cikis_ozet(), font=('Segoe UI',8),
-                                  bg=APP, fg=GRI, anchor='w')
+                                  bg=KART, fg=GRI, anchor='w')
         self.cikis_lbl.pack(side='left', padx=(8,0), fill='x', expand=True)
 
-        # — Sekme 3: Word Şablon —
-        t3 = tk.Frame(nb, bg=APP, padx=10, pady=10); nb.add(t3, text="Word Şablon")
-        tk.Label(t3, text="Hazır .doc/.docx şablon klasörü (VKN ile eşleşir):",
-                 font=F_KUC, bg=APP, fg=KOYU, anchor='w',
-                 wraplength=300, justify='left').pack(fill='x')
-        wf = tk.Frame(t3, bg=APP); wf.pack(fill='x', pady=(2,8))
-        self._buton(wf, "Şablon klasörü…", self._sablon_klasoru_sec).pack(side='left')
-        self.sablon_lbl = tk.Label(wf, text=self._sablon_ozet(), font=('Segoe UI',8),
-                                   bg=APP, fg=GRI, anchor='w')
-        self.sablon_lbl.pack(side='left', padx=(8,0), fill='x', expand=True)
-        tk.Label(t3, text="İnceleme Dayanağı (sözleşme) — her Word tutanağına yazılır:",
-                 font=F_KUC, bg=APP, fg=KOYU, anchor='w',
-                 wraplength=300, justify='left').pack(fill='x')
-        ttk.Entry(t3, textvariable=self.inceleme_dayanagi,
-                  font=('Segoe UI',9)).pack(fill='x', pady=(2,0))
-        tk.Label(t3, text="ör: 31.01.2026 Tarih ve 09 Sayılı Tam Tasdik Sözleşmesi\n"
-                          "Boş bırakırsanız şablondaki mevcut yazı aynen kalır.",
-                 font=('Segoe UI',8), bg=APP, fg=GRI, justify='left',
-                 wraplength=300).pack(fill='x', pady=(3,0))
+        # Word Şablon bloğu (yalnız Word/İkisi seçiliyken görünür)
+        self.word_blok = tk.Frame(ci, bg=KART)
+        self._word_blok_yap(self.word_blok)
+        self._word_blok_guncelle()
+
+        # ── Oluştur butonu (tam genişlik) ──
+        self.olustur_btn = tk.Button(
+            main, text="▶  TUTANAKLARI OLUŞTUR", command=self._olustur_tikla,
+            font=('Segoe UI',11,'bold'), bg=ANA_RENK, fg='white',
+            activebackground=ANA_RENK2, activeforeground='white',
+            relief='flat', bd=0, pady=12, cursor='hand2')
+        self.olustur_btn.pack(fill='x', pady=(GAP,0))
+        self.olustur_btn.bind('<Enter>', lambda e: self._btn_hover(True))
+        self.olustur_btn.bind('<Leave>', lambda e: self._btn_hover(False))
+
+        # İlerleme çubuğu + durum
+        try:
+            self.ilerleme_var = tk.DoubleVar(value=0)
+            self.ilerleme_bar = ttk.Progressbar(
+                main, style="Ymm.Horizontal.TProgressbar",
+                orient='horizontal', mode='determinate',
+                variable=self.ilerleme_var, maximum=100)
+            self.ilerleme_bar.pack(fill='x', pady=(6,0))
+            self.ilerleme_yazi = tk.Label(main, text="", font=('Segoe UI',8),
+                                          bg=APP, fg=GRI)
+            self.ilerleme_yazi.pack(anchor='w')
+        except Exception:
+            self.ilerleme_var = self.ilerleme_bar = self.ilerleme_yazi = None
+        self.durum_lbl = tk.Label(main, text="● Hazır", font=F_KUC, bg=APP, fg=YESIL)
+        self.durum_lbl.pack(anchor='w', pady=(2,0))
+
+        # ④ Özet metrik kartları (işlem sonrası dolar)
+        mf = tk.Frame(main, bg=APP); mf.pack(fill='x', pady=(GAP,0))
+        self.m_firma  = self._metrik_kart(mf, "Firma (üretilen/seçilen)", 0)
+        self.m_kapsam = self._metrik_kart(mf, "Gerçek kapsam", 1)
+        self.m_dosya  = self._metrik_kart(mf, "Tutanak sayısı", 2)
+
+        # Uyarı şeridi (boşken görünmez; işlem sonrası doldurulur)
+        self.uyari_lbl = tk.Label(main, text="", bg=APP, fg=UYARI,
+                                  font=F_KUC, anchor='w', justify='left')
+        self.uyari_lbl.pack(fill='x', pady=(6,0))
+
+        # ── İşlem günlüğü — DEFAULT KAPALI, başlığa tıklayınca açılır ──
+        self.log_bas = tk.Label(main, text="▸  İşlem günlüğü — detayları göster",
+                                bg=APP, fg=GRI, font=F_KUC, cursor='hand2', anchor='w')
+        self.log_bas.pack(fill='x', pady=(GAP,0))
+        self.log_bas.bind('<Button-1>', lambda e: self._log_ac_kapa())
+
+        self.log_cerceve = tk.Frame(main, bg=LOG_BG,
+                                    highlightbackground=KENAR, highlightthickness=1)
+        # (başlangıçta pack EDİLMEZ → gizli)
+        self.log = tk.Text(self.log_cerceve, font=F_CON, bg=LOG_BG, fg='#CBD5E1',
+                           relief='flat', bd=10, wrap='word', state='disabled', height=12,
+                           insertbackground='#CBD5E1', selectbackground='#3A2A30')
+        sb = ttk.Scrollbar(self.log_cerceve, command=self.log.yview)
+        self.log.configure(yscrollcommand=sb.set)
+        sb.pack(side='right', fill='y')
+        self.log.pack(fill='both', expand=True)
+        self.log.tag_config('ok',   foreground='#4ADE80')
+        self.log.tag_config('err',  foreground='#F87171')
+        self.log.tag_config('info', foreground='#7DD3FC')
+        self.log.tag_config('warn', foreground='#FBBF24')
+        self._log_acik = False
+
         try:
             self.inceleme_dayanagi.trace_add('write', lambda *a: self._ayar_kaydet())
         except Exception:
             pass
 
-        # Tek dosyada birleştirme + boş şablon (eşleşmeyenler için)
-        tk.Frame(t3, bg=KENAR, height=1).pack(fill='x', pady=8)
-        tk.Checkbutton(t3, text="Word tutanaklarını tek dosyada birleştir (.docx)",
+        self._log("e-YMM Karşıt İnceleme Asistanı hazır. Kriter/çıktı seçin, "
+                  "listeyi bırakın ve TUTANAKLARI OLUŞTUR'a basın.", "info")
+
+    def _word_blok_yap(self, blok):
+        """Çıktı kartındaki Word Şablon ayarlarını (yalnız Word/İkisi'de görünür) kurar."""
+        tk.Frame(blok, bg=KENAR, height=1).pack(fill='x', pady=(8,6))
+        tk.Label(blok, text="Word şablon klasörü (VKN ile eşleşir):", bg=KART, fg=KOYU,
+                 font=('Segoe UI',8), anchor='w', wraplength=250,
+                 justify='left').pack(fill='x')
+        wf = tk.Frame(blok, bg=KART); wf.pack(fill='x', pady=(2,6))
+        self._buton(wf, "Şablon klasörü…", self._sablon_klasoru_sec).pack(side='left')
+        self.sablon_lbl = tk.Label(wf, text=self._sablon_ozet(), font=('Segoe UI',8),
+                                   bg=KART, fg=GRI, anchor='w')
+        self.sablon_lbl.pack(side='left', padx=(8,0), fill='x', expand=True)
+        tk.Label(blok, text="İnceleme Dayanağı (sözleşme):", bg=KART, fg=KOYU,
+                 font=('Segoe UI',8), anchor='w').pack(fill='x')
+        ttk.Entry(blok, textvariable=self.inceleme_dayanagi,
+                  font=('Segoe UI',9)).pack(fill='x', pady=(2,4))
+        tk.Checkbutton(blok, text="Tutanakları tek dosyada birleştir (.docx)",
                        variable=self.word_tek_dosya, onvalue=True, offvalue=False,
-                       font=F_KUC, bg=APP, fg=KOYU, activebackground=APP,
-                       anchor='w', command=self._ayar_kaydet,
-                       wraplength=300).pack(fill='x')
-        bf = tk.Frame(t3, bg=APP); bf.pack(fill='x', pady=(6,0))
+                       bg=KART, fg=KOYU, activebackground=KART, selectcolor=KART,
+                       font=('Segoe UI',8), anchor='w', command=self._ayar_kaydet,
+                       wraplength=250).pack(fill='x')
+        bf = tk.Frame(blok, bg=KART); bf.pack(fill='x', pady=(4,0))
         self._buton(bf, "Boş şablon…", self._bos_sablon_sec).pack(side='left')
         self.bos_lbl = tk.Label(bf, text=self._bos_ozet(), font=('Segoe UI',8),
-                                bg=APP, fg=GRI, anchor='w')
+                                bg=KART, fg=GRI, anchor='w')
         self.bos_lbl.pack(side='left', padx=(8,0), fill='x', expand=True)
-        tk.Label(t3, text="Eşleşmeyen firma için bu boş şablon kullanılır; fatura ile "
-                          "bilinen ünvan/VKN yazılır, kalan bilgileri siz doldurursunuz.",
-                 font=('Segoe UI',8), bg=APP, fg=GRI, justify='left',
-                 wraplength=300).pack(fill='x', pady=(3,0))
 
-        # ── Sürükle-bırak (davetkâr, vurgu kenarlı kart) ──
-        self.birak = tk.Frame(sol, bg=KART, relief='flat', bd=0, cursor='hand2',
-                              highlightbackground=ACCENT, highlightcolor=ACCENT,
-                              highlightthickness=2)
-        self.birak.pack(fill='both', expand=True, pady=(2,10))
-
-        self.birak_ikon = tk.Label(self.birak, text="📥",
-                                   font=('Segoe UI',36), bg=KART, fg=ACCENT)
-        self.birak_ikon.pack(expand=True, pady=(22,2))
-
-        self.birak_yazi = tk.Label(self.birak,
-                                   text="Liste dosyalarını buraya sürükleyin",
-                                   font=('Segoe UI',11,'bold'), bg=KART, fg=KOYU,
-                                   wraplength=300, justify='center')
-        self.birak_yazi.pack(expand=True, pady=(0,2))
-
-        self.birak_alt = tk.Label(self.birak,
-                                  text="ya da tıklayarak seçin\nExcel · CSV · TXT  (çoklu seçilebilir)",
-                                  font=('Segoe UI',8), bg=KART, fg=GRI,
-                                  wraplength=300, justify='center')
-        self.birak_alt.pack(pady=(0,16))
-
-        for w in (self.birak, self.birak_ikon, self.birak_yazi, self.birak_alt):
-            w.bind('<Button-1>', self._tiklayarak_sec)
-
-        self.durum_lbl = tk.Label(sol, text="● Hazır",
-                                  font=('Segoe UI',9), bg=APP, fg=YESIL)
-        self.durum_lbl.pack(anchor='w')
-
-        # ── İlerleme çubuğu (işlem sırasında firma sayısına göre dolar) ──
+    def _word_blok_guncelle(self):
+        """Çıktı türü Word/İkisi ise Word Şablon bloğunu göster, değilse gizle."""
         try:
-            self.ilerleme_var = tk.DoubleVar(value=0)
-            self.ilerleme_bar = ttk.Progressbar(
-                sol, style="Ymm.Horizontal.TProgressbar",
-                orient='horizontal', mode='determinate',
-                variable=self.ilerleme_var, maximum=100)
-            self.ilerleme_bar.pack(fill='x', pady=(6, 0))
-            self.ilerleme_yazi = tk.Label(sol, text="", font=('Segoe UI', 8),
-                                          bg=APP, fg=GRI)
-            self.ilerleme_yazi.pack(anchor='w')
+            if self.cikti_turu.get() in ('word', 'ikisi'):
+                self.word_blok.pack(fill='x')
+            else:
+                self.word_blok.pack_forget()
         except Exception:
-            self.ilerleme_var = None
-            self.ilerleme_bar = None
-            self.ilerleme_yazi = None
+            pass
 
-        # ── Sağ panel (log) ──
-        sag = tk.Frame(self.root, bg=APP)
-        sag.pack(side='right', fill='both', expand=True, padx=(0,16), pady=14)
+    def _segment_yenile(self):
+        """Segmented butonların seçili olanını bordo, diğerlerini nötr boyar."""
+        try:
+            secili = self.cikti_turu.get()
+        except Exception:
+            secili = 'excel'
+        for deger, b in getattr(self, '_seg_btn', {}).items():
+            if deger == secili:
+                b.config(bg=ANA_RENK, fg='white')
+            else:
+                b.config(bg=KART, fg=GRI)
 
-        basr = tk.Frame(sag, bg=APP); basr.pack(fill='x')
-        tk.Label(basr, text="İşlem Günlüğü", font=('Segoe UI',10,'bold'),
-                 bg=APP, fg=KOYU, anchor='w').pack(side='left')
-        tk.Label(basr, text="canlı", font=('Segoe UI',8), bg=APP, fg=GRI).pack(side='right')
+    def _segment_sec(self, deger):
+        self.cikti_turu.set(deger)
+        self._segment_yenile()
+        self._word_blok_guncelle()
+        self._ayar_kaydet()
 
-        lf = tk.Frame(sag, bg=LOG_BG, highlightbackground=KENAR, highlightthickness=1)
-        lf.pack(fill='both', expand=True, pady=(6,0))
+    def _kapsam_kaydir(self, val):
+        """Kapsam % slider'ı; StringVar'ı (self.yuzde80) ve değer etiketini günceller."""
+        try:
+            v = int(float(val))
+            self.yuzde80.set(str(v))
+            self.kapsam_lbl.config(text=f"%{v}")
+            self._ayar_kaydet()
+        except Exception:
+            pass
 
-        self.log = tk.Text(lf, font=F_CON, bg=LOG_BG, fg='#CBD5E1',
-                           relief='flat', bd=10, wrap='word', state='disabled',
-                           insertbackground='#CBD5E1', selectbackground='#334155')
-        sb = ttk.Scrollbar(lf, command=self.log.yview)
-        self.log.configure(yscrollcommand=sb.set)
-        sb.pack(side='right', fill='y')
-        self.log.pack(fill='both', expand=True)
+    def _btn_hover(self, icinde):
+        try:
+            self.olustur_btn.config(bg=(ANA_RENK2 if icinde else ANA_RENK))
+        except Exception:
+            pass
 
-        self.log.tag_config('ok',   foreground='#4ADE80')
-        self.log.tag_config('err',  foreground='#F87171')
-        self.log.tag_config('info', foreground='#7DD3FC')
-        self.log.tag_config('warn', foreground='#FBBF24')
+    def _log_ac_kapa(self):
+        """İşlem günlüğünü açar/kapatır (başlangıçta kapalı)."""
+        try:
+            if self._log_acik:
+                self.log_cerceve.pack_forget()
+                self.log_bas.config(text="▸  İşlem günlüğü — detayları göster")
+                self._log_acik = False
+            else:
+                self.log_cerceve.pack(fill='both', expand=True, pady=(6,0))
+                self.log_bas.config(text="▾  İşlem günlüğü — gizle")
+                self._log_acik = True
+        except Exception:
+            pass
 
-        self._log("e-YMM Karşıt İnceleme Asistanı hazır.\n"
-                  "Soldaki sekmelerden kriter ve çıktı türünü seçin,\n"
-                  "sonra listeyi bırakma alanına sürükleyin.", "info")
+    def _olustur_tikla(self):
+        """Oluştur butonu: seçili dosyalarla işlemi başlatır."""
+        if self._isleniyor:
+            return
+        dosyalar = getattr(self, '_secili_dosyalar', None)
+        if not dosyalar:
+            try:
+                messagebox.showinfo("Dosya seçin",
+                                    "Önce bir liste dosyası seçin veya sürükleyin.")
+            except Exception:
+                pass
+            return
+        self._isle_coklu(dosyalar)
 
-    def _esik_satir(self, parent, etiket, var, ipucu):
-        tk.Label(parent, text=etiket, font=F_KUC, bg=APP,
-                 fg=KOYU, anchor='w').pack(fill='x')
-        f = tk.Frame(parent, bg=APP); f.pack(fill='x', pady=(2,0))
-        ttk.Entry(f, textvariable=var, font=F_ANA, width=14).pack(side='left', padx=(0,6))
-        tk.Label(f, text=ipucu, font=('Segoe UI',8),
-                 bg=APP, fg='#9CA3AF').pack(side='left')
+    def _dosya_sec(self, dosyalar):
+        """Seçilen/bırakılan dosyaları saklar ve bırak alanını 'hazır' gösterir
+        (işlem 'TUTANAKLARI OLUŞTUR' ile başlar)."""
+        FORMATLAR = ('.xls', '.xlsx', '.csv', '.txt')
+        gecerli = [d for d in dosyalar if Path(d).suffix.lower() in FORMATLAR]
+        if not gecerli:
+            self._birak_guncelle("Desteklenmeyen dosya (Excel/CSV/TXT)", HATA)
+            return
+        self._secili_dosyalar = gecerli
+        if len(gecerli) == 1:
+            self.birak_yazi.config(text=Path(gecerli[0]).name, fg=KOYU)
+        else:
+            self.birak_yazi.config(text=f"{len(gecerli)} dosya seçildi", fg=KOYU)
+        try:
+            self.birak_alt.config(text="✓ hazır — TUTANAKLARI OLUŞTUR'a basın", fg=YESIL)
+            self.durum_lbl.config(text="● Dosya hazır", fg=YESIL)
+        except Exception:
+            pass
 
     def _logo_yukle(self):
         for yol in [kaynak_yolu('logo.png'),
@@ -2433,7 +2582,7 @@ class KDVBolmeApp:
             import tkinterdnd2
             self.root.drop_target_register(tkinterdnd2.DND_FILES)
             self.root.dnd_bind('<<Drop>>',
-                               lambda e: self._isle_coklu(self._dnd_ayikla(e.data)))
+                               lambda e: self._dosya_sec(self._dnd_ayikla(e.data)))
         except: pass
 
     @staticmethod
@@ -2444,7 +2593,8 @@ class KDVBolmeApp:
         return [a or b for a, b in parcalar if (a or b)]
 
     def _tiklayarak_sec(self, e=None):
-        """Sürükle-bırak alanına tıklanınca dosya seçtirir (çoklu seçim)."""
+        """Sürükle-bırak alanına tıklanınca dosya seçtirir (çoklu seçim).
+        İşlem başlatmaz; dosyayı seçip 'hazır' gösterir (OLUŞTUR ile işlenir)."""
         dosyalar = filedialog.askopenfilenames(
             title="KDV Liste(ler)ini Seçin",
             filetypes=[("Desteklenen", "*.xls *.xlsx *.csv *.txt"),
@@ -2452,7 +2602,7 @@ class KDVBolmeApp:
                        ("CSV/Metin", "*.csv *.txt"),
                        ("Tümü", "*.*")])
         if dosyalar:
-            self._isle_coklu(list(dosyalar))
+            self._dosya_sec(list(dosyalar))
 
     def _cikis_ozet(self):
         if self._cikis_kok:
@@ -2559,6 +2709,8 @@ class KDVBolmeApp:
         self._ayar_kaydet()
 
         self._isleniyor = True
+        try: self.olustur_btn.config(state='disabled', text="⏳  İŞLENİYOR…")
+        except Exception: pass
         self._birak_guncelle("⏳ İşleniyor...", TURUNCU)
         self._ilerleme(0, 0)
         self.durum_lbl.config(
@@ -2576,14 +2728,15 @@ class KDVBolmeApp:
                       sablon_klasor=None, cikti_turu='ikisi', inceleme_dayanagi=None,
                       word_tek_dosya=False, bos_sablon=None):
         toplam_b = 0; toplam_h = 0; son_klasor = None
+        toplam_sec = 0; toplam_sablonsuz = 0; toplam_gecersiz = 0; son_kapsam = None
         n = len(dosyalar)
         for i, dosya in enumerate(dosyalar, 1):
             self._log(f"\n{'═'*50}", "info")
             onek = f"[{i}/{n}] " if n > 1 else ""
             self._log(f"📂 {onek}{Path(dosya).name}", "info")
             sonuc = {}
-            def _tamam_ic(kl, b, h, _s=sonuc):
-                _s['klasor'] = kl; _s['b'] = b; _s['h'] = h
+            def _tamam_ic(kl, b, h, ozet=None, _s=sonuc):
+                _s['klasor'] = kl; _s['b'] = b; _s['h'] = h; _s['ozet'] = ozet or {}
             try:
                 dosyalari_isle(dosya, esik_tek, esik_toplam, yuzde80,
                                self._log, _tamam_ic, self._ilerleme,
@@ -2593,13 +2746,22 @@ class KDVBolmeApp:
             except Exception as e:
                 self._log(f"❌ {e}", "err")
             toplam_b += sonuc.get('b', 0); toplam_h += sonuc.get('h', 0)
+            oz = sonuc.get('ozet') or {}
+            toplam_sec += oz.get('secilen', 0)
+            toplam_sablonsuz += oz.get('sablonsuz', 0)
+            toplam_gecersiz += oz.get('gecersiz', 0)
+            if oz.get('kapsam') is not None:
+                son_kapsam = oz['kapsam']
             if sonuc.get('klasor'):
                 son_klasor = sonuc['klasor']
         if n > 1:
             self._log(f"\n{'═'*50}", "info")
             self._log(f"🏁 Toplu işlem bitti: {n} dosya → {toplam_b} tutanak"
                       + (f", {toplam_h} hata" if toplam_h else ""), "ok")
-        self._tamam(son_klasor, toplam_b, toplam_h)
+        ozet_top = {'secilen': toplam_sec, 'uretilen': toplam_b, 'dosya': toplam_b,
+                    'kapsam': son_kapsam, 'sablonsuz': toplam_sablonsuz,
+                    'gecersiz': toplam_gecersiz}
+        self._tamam(son_klasor, toplam_b, toplam_h, ozet_top)
 
     def _log(self, msg, tip=''):
         def _():
@@ -2627,27 +2789,49 @@ class KDVBolmeApp:
                 pass
         self.root.after(0, _)
 
-    def _tamam(self, klasor, basarili, hatali):
+    def _tamam(self, klasor, basarili, hatali, ozet=None):
         self._isleniyor = False
         def _():
+            try:
+                self.olustur_btn.config(state='normal', text="▶  TUTANAKLARI OLUŞTUR")
+            except Exception:
+                pass
+            self._metrik_guncelle(basarili, ozet)
             if klasor and basarili > 0:
-                self._birak_guncelle(f"✅ {basarili} dosya hazır", "#68D391")
-                self.durum_lbl.config(text=f"{basarili} Excel oluşturuldu", fg='#276749')
+                self._birak_guncelle(f"✅ {basarili} firma tamamlandı", YESIL)
+                self.durum_lbl.config(text=f"{basarili} tutanak oluşturuldu", fg=YESIL)
                 try: os.startfile(klasor)
                 except: pass
             else:
-                self._birak_guncelle("❌ Hata oluştu", "#FC8181")
-                self.durum_lbl.config(text="Hata — log'u inceleyin", fg='#C53030')
-            def _sifirla():
-                self._birak_guncelle("Yeni dosya için buraya bırakın", GRI)
-                if self.ilerleme_bar is not None:
-                    try:
-                        self.ilerleme_var.set(0)
-                        self.ilerleme_yazi.config(text="")
-                    except Exception:
-                        pass
-            self.root.after(4000, _sifirla)
+                self._birak_guncelle("❌ Hata oluştu", HATA)
+                self.durum_lbl.config(text="Hata — işlem günlüğünü açıp inceleyin", fg=HATA)
+                # Hata varsa günlüğü otomatik aç
+                if not self._log_acik:
+                    self._log_ac_kapa()
         self.root.after(0, _)
+
+    def _metrik_guncelle(self, basarili, ozet):
+        """④ Özet metrik kartlarını ve uyarı şeridini doldurur."""
+        ozet = ozet or {}
+        try:
+            sec = ozet.get('secilen')
+            uret = ozet.get('uretilen', basarili)
+            self.m_firma.config(text=(f"{uret}/{sec}" if sec else str(uret)))
+            kap = ozet.get('kapsam')
+            self.m_kapsam.config(text=(f"%{kap:.1f}" if isinstance(kap, (int, float)) else "—"))
+            self.m_dosya.config(text=str(ozet.get('dosya', basarili)))
+            parcalar = []
+            if ozet.get('sablonsuz'):
+                parcalar.append(f"{ozet['sablonsuz']} firmanın Word şablonu yok")
+            if ozet.get('gecersiz'):
+                parcalar.append(f"{ozet['gecersiz']} geçersiz VKN'li satır (tutanaklanamadı)")
+            if parcalar:
+                self.uyari_lbl.config(text="⚠  " + "  ·  ".join(parcalar),
+                                      bg="#FBF3E2", fg=UYARI)
+            else:
+                self.uyari_lbl.config(text="", bg=APP)
+        except Exception:
+            pass
 
     def _birak_guncelle(self, yazi, renk):
         self.birak_yazi.config(text=yazi, fg=renk)

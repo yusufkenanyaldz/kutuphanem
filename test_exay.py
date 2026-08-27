@@ -597,6 +597,30 @@ def test_gercek_gib_basliklari_word_eslemesi():
 #  GUI kurulum dumanı — _ui() sahte pencereyle çalışır; eksik metot/callback
 #  bağlamaları (ör. bind command'ları) burada yakalanır (regresyon güvencesi).
 # ══════════════════════════════════════════════════════════════════════════
+def test_tamam_cb_ozet_metrik_ve_geriye_uyum(tmp_path):
+    """dosyalari_isle bitince tamam_cb'ye 4. argüman olarak özet metrik sözlüğü
+    geçirir; yalnızca 3 argüman kabul eden eski geri çağrılar da kırılmamalı."""
+    yol = tmp_path / "NISAN_2026.xlsx"
+    _yeni_gib_yaz(yol)                                   # 2 firma seçilir, 1 geçersiz satır
+    yakalanan = {}
+    def cb4(kl, b, h, ozet=None):
+        yakalanan['ozet'] = ozet
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, cb4, lambda *a: None,
+                        cikti_turu='excel')
+    oz = yakalanan['ozet']
+    assert oz['secilen'] == 2 and oz['uretilen'] == 2
+    assert isinstance(oz['kapsam'], (int, float)) and oz['kapsam'] > 0
+    assert oz['gecersiz'] >= 1                            # placeholder VKN'li satır
+
+    # 3 argümanlı eski imza da çalışmalı (TypeError'a düşüp 3-arg çağrılır)
+    calisti = {}
+    def cb3(kl, b, h):
+        calisti['ok'] = True
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, cb3, lambda *a: None,
+                        cikti_turu='excel')
+    assert calisti.get('ok')
+
+
 def test_gui_kurulur_ve_callbackler_tanimli():
     from unittest.mock import MagicMock
     root = MagicMock(name="root")
@@ -605,7 +629,9 @@ def test_gui_kurulur_ve_callbackler_tanimli():
     for m in ["_tiklayarak_sec", "_isle", "_isle_coklu", "_batch_worker",
               "_cikis_klasoru_sec", "_sablon_klasoru_sec", "_cikis_ozet",
               "_sablon_ozet", "_kriter_al", "_ilerleme", "_tamam", "_log",
-              "_ayar_kaydet", "_birak_guncelle", "_dnd_ayikla"]:
+              "_ayar_kaydet", "_birak_guncelle", "_dnd_ayikla",
+              "_dosya_sec", "_olustur_tikla", "_segment_sec", "_kapsam_kaydir",
+              "_log_ac_kapa", "_metrik_guncelle", "_word_blok_guncelle"]:
         assert callable(getattr(app, m)), f"Eksik/çağrılamaz metot: {m}"
 
 
