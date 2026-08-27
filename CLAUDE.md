@@ -150,7 +150,8 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `_docx_inceleme_dayanagi_yaz` | Tutanaktaki "İNCELEME DAYANAĞI" (sözleşme) değer hücresini günceller — eski şablonun eski yılını otomatik ezer. |
 | `_ascii_kucuk` | Türkçe-güvenli küçük harf/ASCII fold (İ→i). Anahtar-kelime eşleşmelerinde `.lower()` yerine bunu kullan. |
 | `_docx_metni_oku` | `.docx` metnini (paragraf + tablo hücreleri, sekmeli) çıkarır — VKN okuma için. |
-| `_word_fatura_satiri` / `_fatura_tablosu_mu` / `_tr_para_str` | Fatura satırını Word tablo sırasına çevirir; fatura tablosunu başlığından tanır; TR para biçimi. |
+| `_word_fatura_satiri` / `_fatura_tablosu_mu` / `_tr_para_str` | Fatura satırını Word tablo sırasına çevirir (KONUMSAL yedek); fatura tablosunu başlığından tanır (tutanak *ve* YMM yazısı); TR para biçimi. |
+| `_fatura_kolon_rolu` / `_fatura_kolon_basliklari` / `_fatura_deger_haritasi` / `_fatura_satir_hucreleri` | **Başlığa göre** sütun eşleme: her sütunun başlığından rol (tarih/no/cins/miktar/matrah/kdv/**dahil**/bos) çıkarır. Böylece tutanağın son sütunu 'Defter Kayıt' **boş** kalır, YMM yazısının 'KDV dahil toplam' sütunu **matrah+kdv** ile dolar. Başlıklar güvenilmezse `_word_fatura_satiri` konumsal yola düşülür. |
 | `_gecersizlik_nedeni` | Geçersiz VKN için insan-okur neden metni. |
 | `firmalari_filtrele` | **KALP.** VKN normalize, geçerli/geçersiz ayrım, 2 aşamalı %80 seçimi. |
 | `guvenli_kaydet` | Windows uzun yol (~260) sorununda dosya adını kısaltarak yeniden kaydeder. |
@@ -254,10 +255,17 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - **İnceleme Dayanağı (sözleşme):** GUI'den girilirse her Word tutanağının
   "İNCELEME DAYANAĞI" hücresi bununla ezilir — gözden kaçan eski yıl şablonları
   bile güncel sözleşmeyle çıkar. Boşsa şablondaki yazı aynen kalır.
-- **Çok-firmalı tek `.docx` şablon:** Bir dosyada birçok firmanın tutanağı
-  toplanmışsa (her blok "KATMA DEĞER…TUTANAĞI" başlığıyla), program dosyayı
-  bloklara ayırıp her firmayı VKN ile ayrı indeksler; üretirken ilgili firmanın
-  bloğunu izole edip fatura tablosunu doldurur. **Birleşik `.doc`** (eski ikili)
+- **İki belge tipi (tutanak + YMM yazısı):** Şablonlar iki türdür — (a) *karşıt
+  inceleme tutanağı* ("NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN", son sütun
+  'Defter Kayıt') ve (b) *YMM Bilgi İsteme yazısı* ("Hakkında Bilgi İstenilen
+  Mükellef", son sütun 'KDV dahil toplam'). VKN okuma (`sablon_vkn_metinden` +
+  `_blok_vkn`) ve fatura doldurma (`_fatura_kolon_rolu` başlık-eşlemesi) ikisini
+  de tanır; blok bölme (`_docx_firma_bloklari`, `_metni_bloklara_ayir`) her iki
+  başlığı da blok başı sayar, karşı-taraf tablosunu her iki başlıktan bulur.
+- **Çok-firmalı tek `.docx` şablon:** Bir dosyada birçok firmanın tutanağı/yazısı
+  toplanmışsa (her blok "KATMA DEĞER…TUTANAĞI" ya da "Konu: Bilgi İsteme"
+  başlığıyla), program dosyayı bloklara ayırıp her firmayı VKN ile ayrı indeksler;
+  üretirken ilgili firmanın bloğunu izole edip fatura tablosunu doldurur. **Birleşik `.doc`** (eski ikili)
   ise indeks aşamasında Word (COM) ile bir kez `.docx`'e çevrilir (`_doc_docx_cevir`)
   ve bloklar oradan okunur; böylece üretim tümüyle test edilmiş `.docx` yolundan
   gider. (Tekli `.doc` COM ile yerinde düzenlenir; birleşik `.doc` dönüştürme adımı

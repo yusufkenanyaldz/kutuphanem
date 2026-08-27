@@ -923,8 +923,11 @@ def _metni_bloklara_ayir(metin):
     bloklara ayırır; her blok bir firma tutanağıdır. Tek/başlıksız metinde tek
     eleman döner. (Eski ikili .doc'un birleşik olup olmadığını anlamakta kullanılır.)"""
     ak = _ascii_kucuk(metin)
-    idxs = [m.start() for m in re.finditer(
-        r'katma deger.{0,40}?karsit inceleme.{0,20}?tutana', ak)]
+    # İki belge tipinin de blok başlangıcı: (a) karşıt inceleme TUTANAĞI başlığı,
+    # (b) YMM (Bilgi İsteme) YAZISI'nın 'Konu : Bilgi İsteme' satırı.
+    idxs = sorted(m.start() for m in re.finditer(
+        r'katma deger.{0,40}?karsit inceleme.{0,20}?tutana|konu\s*[:：].{0,20}?bilgi isteme',
+        ak))
     if len(idxs) <= 1:
         return [metin]
     idxs.append(len(metin))
@@ -1059,8 +1062,75 @@ def _fatura_tablosu_mu(basliklar):
     """Bir Word tablosunun başlık hücre metinlerine bakıp 'Karşıt İncelemeye Konu
     Fatura' tablosu olup olmadığına karar verir."""
     b = _ascii_kucuk(' '.join(basliklar))
-    imzalar = ('tarih', 'numar', 'kdv')          # Tarihi + Numarası + KDV Tutarı
-    return sum(1 for x in imzalar if x in b) >= 2 and ('cins' in b or 'tutar' in b)
+    # Numara sütunu tutanakta 'Numarası', YMM (Bilgi İsteme) yazısında 'Nosu'.
+    numar = ('numar' in b) or ('nosu' in b) or ('fat. no' in b) or ('fat.no' in b)
+    imzalar = int('tarih' in b) + int(numar) + int('kdv' in b)
+    return imzalar >= 2 and ('cins' in b or 'tutar' in b or 'matrah' in b)
+
+def _fatura_kolon_rolu(baslik):
+    """Bir fatura sütununun başlık metninden rolünü belirler. İki belge tipini de
+    (karşıt inceleme TUTANAĞI ve YMM 'Bilgi İsteme' YAZISI) tek eşlemeyle karşılar.
+    Roller: tarih, no, cins, miktar, matrah, kdv, dahil (KDV dahil toplam), bos."""
+    h = _ascii_kucuk(baslik)
+    if 'defter' in h or 'yevmiye' in h or 'kayit' in h:
+        return 'bos'                       # tutanaktaki 'Defter Kayıt' sütunu → boş
+    if 'tarih' in h:
+        return 'tarih'
+    if 'numar' in h or 'nosu' in h or ('no' in h and 'cins' not in h and 'kdv' not in h):
+        return 'no'
+    if 'cins' in h:
+        return 'cins'
+    if 'miktar' in h:
+        return 'miktar'
+    if 'dahil' in h or 'toplam' in h:
+        return 'dahil'                     # YMM yazısındaki 'KDV dahil toplam'
+    if 'kdv' in h:
+        return 'kdv'
+    if 'matrah' in h or 'tutar' in h:
+        return 'matrah'
+    return 'bos'
+
+def _fatura_deger_haritasi(row, kolonlar):
+    """Kaynak fatura satırından her rol için hücre metnini üretir (rol → metin).
+    matrah/kdv aynı bulucularla; 'dahil' = matrah + kdv (sayısal, sonra TR biçim)."""
+    tarih, no, cins, miktar, matrah, kdv, _bos = _word_fatura_satiri(row, kolonlar)
+    tutar_col = sutun_bul(kolonlar, ["kdv hariç tutarı", "faturanın tutarı"])
+    kdv_col   = kdv_sutunu_bul(kolonlar) or sutun_bul(kolonlar, ["toplam indirilecek kdv"])
+    dahil = ''
+    try:
+        mv = para_deger(row.get(tutar_col, None)) if tutar_col else None
+        kv = para_deger(row.get(kdv_col, None)) if kdv_col else None
+        if mv is not None or kv is not None:
+            dahil = _tr_para_str((mv or 0.0) + (kv or 0.0))
+    except Exception:
+        dahil = ''
+    return {'tarih': tarih, 'no': no, 'cins': cins, 'miktar': miktar,
+            'matrah': matrah, 'kdv': kdv, 'dahil': dahil, 'bos': ''}
+
+def _fatura_kolon_basliklari(satirlar, veri_bas, hucre_metni=lambda c: c.text):
+    """Fatura tablosunun her sütunu için, TÜM başlık satırlarını (0..veri_bas-1)
+    birleştiren başlık metnini döndürür. Birleşik (merged) hücreler python-docx'te
+    sütun boyunca tekrar ettiğinden sütun indeksiyle güvenle hizalanır. Böylece
+    tutanaktaki iki satırlı 'Defter Kayıt / Tarihi-Nosu' başlığı tek metinde toplanır."""
+    bas_satirlar = list(satirlar)[:max(veri_bas, 1)]
+    if not bas_satirlar:
+        return []
+    n = max(len(getattr(r, 'cells', r)) for r in bas_satirlar)
+    basliklar = [''] * n
+    for r in bas_satirlar:
+        for ci, c in enumerate(getattr(r, 'cells', r)):
+            if ci < n:
+                basliklar[ci] = (basliklar[ci] + ' ' + hucre_metni(c)).strip()
+    return basliklar
+
+def _fatura_satir_hucreleri(row, kolonlar, roller):
+    """Rol listesine göre bir kaynak satırı hedef tablo sütun sırasına çevirir.
+    `roller` güvenilir görünmüyorsa (tarih ve para sütunu yoksa) None döner ki
+    çağıran eski KONUMSAL eşlemeye (`_word_fatura_satiri`) düşebilsin."""
+    if not roller or 'tarih' not in roller or not ({'matrah', 'kdv', 'dahil'} & set(roller)):
+        return None
+    harita = _fatura_deger_haritasi(row, kolonlar)
+    return [harita.get(rol, '') for rol in roller]
 
 def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=None,
                        inceleme_dayanagi=None):
@@ -1140,6 +1210,27 @@ def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
 
         _yaz(f"      🧩 Fatura tablosu bulundu (veri {veri_bas}. satırdan başlıyor).", "info")
 
+        # Sütun rollerini başlık satırlarından (1..veri_bas-1) çöz. Table.Cell(r,c)
+        # birleşik hücrelerde bile ilgili sütunun hücresini döndürdüğünden, iki
+        # satırlı 'Defter Kayıt / Tarihi-Nosu' başlığı tek metinde birleşir ve
+        # tutanak (son sütun boş) ile YMM yazısı (son sütun KDV dahil toplam)
+        # doğru ayrışır. Çözülemezse KONUMSAL eşlemeye düşülür.
+        roller = None
+        try:
+            ncol = hedef_tablo.Rows(max(veri_bas - 1, 1)).Cells.Count
+            kol_bas = []
+            for c in range(1, ncol + 1):
+                parc = []
+                for r in range(1, veri_bas):
+                    try:
+                        parc.append(_hucre(hedef_tablo.Cell(r, c)))
+                    except Exception:
+                        pass
+                kol_bas.append(' '.join(parc))
+            roller = [_fatura_kolon_rolu(b) for b in kol_bas]
+        except Exception:
+            roller = None
+
         # Mevcut veri satırlarını sil (baştaki başlık satırları korunur)
         while hedef_tablo.Rows.Count >= veri_bas:
             try:
@@ -1149,7 +1240,8 @@ def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
 
         yazilan = 0
         for _, row in firma_df.iterrows():
-            hucreler = _word_fatura_satiri(row, tum_kolonlar)
+            hucreler = _fatura_satir_hucreleri(row, tum_kolonlar, roller) \
+                       or _word_fatura_satiri(row, tum_kolonlar)
             yeni = hedef_tablo.Rows.Add()
             try:
                 cells = yeni.Cells
@@ -1297,7 +1389,10 @@ def _docx_firma_bloklari(doc):
     for i, el in enumerate(els):
         if el.tag == qn('w:p'):
             t = _ascii_kucuk(Paragraph(el, doc).text)
-            if 'katma deger' in t and 'karsit inceleme' in t and 'tutana' in t:
+            # Blok başı: karşıt inceleme TUTANAĞI başlığı VEYA YMM yazısının
+            # 'Konu : Bilgi İsteme' satırı (iki belge tipi de tek dosyada olabilir).
+            if (('katma deger' in t and 'karsit inceleme' in t and 'tutana' in t)
+                    or ('konu' in t and 'bilgi isteme' in t)):
                 bas.append(i)
     if not bas:
         bas = [0]
@@ -1311,7 +1406,10 @@ def _docx_firma_bloklari(doc):
                 tb = Table(el, doc)
                 metin = '\n'.join('\t'.join(c.text.strip() for c in r.cells)
                                   for r in tb.rows)
-                if 'nezd' in _ascii_kucuk(metin):
+                mk = _ascii_kucuk(metin)
+                # Karşı taraf bloğu: tutanakta 'NEZDİNDE…', YMM yazısında
+                # 'Hakkında Bilgi İstenilen Mükellef'.
+                if 'nezd' in mk or 'hakkinda bilgi istenilen' in mk:
                     vkn, unvan = sablon_vkn_metinden(metin)
                     if vkn:
                         break
@@ -1363,6 +1461,12 @@ def _docx_fatura_doldur(doc, firma_df, tum_kolonlar, inceleme_dayanagi=None, log
             break
     veri_bas = max(veri_bas, 1)
 
+    # Sütun rollerini başlıklardan çöz (tutanak ve YMM yazısı farklı son sütuna
+    # sahip: 'Defter Kayıt' → boş, 'KDV dahil toplam' → matrah+kdv). Roller
+    # güvenilmezse satır bazında KONUMSAL eşlemeye düşülür.
+    kolon_basliklari = _fatura_kolon_basliklari(hedef.rows, veri_bas)
+    roller = [_fatura_kolon_rolu(b) for b in kolon_basliklari]
+
     proto_tr = None
     if len(hedef.rows) > veri_bas:
         proto_tr = deepcopy(hedef.rows[veri_bas]._tr)
@@ -1371,7 +1475,8 @@ def _docx_fatura_doldur(doc, firma_df, tum_kolonlar, inceleme_dayanagi=None, log
 
     yazilan = 0
     for _, r in firma_df.iterrows():
-        hucreler = _word_fatura_satiri(r, tum_kolonlar)
+        hucreler = _fatura_satir_hucreleri(r, tum_kolonlar, roller) \
+                   or _word_fatura_satiri(r, tum_kolonlar)
         if proto_tr is not None:
             hedef._tbl.append(deepcopy(proto_tr))
             satir = hedef.rows[-1]

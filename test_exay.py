@@ -945,3 +945,107 @@ def test_ymm_yazisi_vkn_eslesme():
 def test_blok_vkn_telefon_karistirmaz():
     blok = "Ünvanı\tX A.Ş.\tTelefon/Fax\t0 342 215 10 70\tVergi Dairesi\tŞAHİNBEY V.D. 6190914983"
     assert exay._blok_vkn(blok) == "6190914983"
+
+
+# ── YMM yazısı: fatura tablosunun son sütunu 'KDV dahil toplam' (tutanakta boş) ──
+def _ymm_yazi_docx_yaz(yol, unvan, vd_hucre):
+    """Gerçek YMM 'Bilgi İsteme' yazısını taklit eden sentetik .docx: 'Hakkında
+    Bilgi İstenilen Mükellef' bloğu + 7 sütunlu, son sütunu 'KDV dahil toplam'
+    olan (tek başlık satırlı) fatura tablosu."""
+    import docx
+    d = docx.Document()
+    d.add_paragraph("Sayı : YMM 27103572/2026-363")
+    d.add_paragraph("Konu : Bilgi İsteme")
+    t0 = d.add_table(rows=0, cols=2)
+    for etiket, deger in [
+        ("Hakkında Bilgi İstenilen Mükellefin", "Hakkında Bilgi İstenilen Mükellefin"),
+        ("Ünvanı", unvan),
+        ("Vergi Dairesi/Hesap Nosu", vd_hucre),
+        ("Telefon/Fax", "0 312 220 0290"),
+        ("İNCELEME DAYANAĞI", "31.01.2026 Tarih ve 09 Sayılı"),
+    ]:
+        r = t0.add_row().cells
+        r[0].text = etiket; r[1].text = deger
+    t2 = d.add_table(rows=1, cols=7)
+    bas = ["FAT.TARİHİ", "FAT. NOSU", "MALIN CİNSİ", "MALIN MİKTARI",
+           "MATRAH", "KDV", "kdv dahİl toplam"]
+    for c, v in enumerate(bas):
+        t2.rows[0].cells[c].text = v
+    d.save(yol)
+
+
+def test_fatura_kolon_rolu_iki_tip():
+    # Tutanak: son sütun 'Defter Kayıt' → boş; YMM: 'KDV dahil toplam' → dahil
+    assert exay._fatura_kolon_rolu("Defter Kayıt Tarihi/Nosu") == "bos"
+    assert exay._fatura_kolon_rolu("kdv dahİl toplam") == "dahil"
+    assert exay._fatura_kolon_rolu("FATURANIN Tarihi") == "tarih"
+    assert exay._fatura_kolon_rolu("FAT. NOSU") == "no"
+    assert exay._fatura_kolon_rolu("MALIN KDV Tutarı") == "kdv"
+    assert exay._fatura_kolon_rolu("MATRAH") == "matrah"
+    assert exay._fatura_kolon_rolu("MALIN Miktarı") == "miktar"
+
+
+def _ornek_firma_df():
+    kols = ["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su",
+            "Alınan Mal ve/veya Hizmetin Cinsi", "Alınan Mal ve/veya Hizmetin Miktarı",
+            "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı", "KDV'si"]
+    firma = pd.DataFrame([
+        ["2026-01-08", "TC42026000001608", "HAZIR BETON", "302 M3", 446641.18, 89328.24],
+    ], columns=kols)
+    return firma, kols
+
+
+def test_ymm_yazi_fatura_kdv_dahil_toplam(tmp_path):
+    import docx
+    sablon = tmp_path / "ymm.docx"
+    _ymm_yazi_docx_yaz(sablon, "OYAK ÇİMENTO FABRİKALARI A.Ş.", "ANKARA KURUMLAR V.D. – 6120050961")
+    firma, kols = _ornek_firma_df()
+    cikti = tmp_path / "ymm_cikti.docx"
+    exay.firma_docx_olustur(str(sablon), firma, str(cikti), kols)
+    d = docx.Document(str(cikti))
+    fatura = next(t for t in d.tables if len(t.columns) == 7)
+    veri = [c.text.strip() for c in fatura.rows[1].cells]      # tek başlık satırı
+    assert veri[0] == "08.01.2026"
+    assert veri[4] == "446.641,18"                              # matrah
+    assert veri[5] == "89.328,24"                               # kdv
+    assert veri[6] == "535.969,42"                              # KDV dahil toplam = matrah+kdv
+
+
+def test_tutanak_defter_kayit_bos(tmp_path):
+    import docx
+    sablon = tmp_path / "tut.docx"
+    _docx_sablon_yaz(sablon, "İSPA A.Ş.", "V.D. 4810017371")
+    firma, kols = _ornek_firma_df()
+    cikti = tmp_path / "tut_cikti.docx"
+    exay.firma_docx_olustur(str(sablon), firma, str(cikti), kols)
+    d = docx.Document(str(cikti))
+    fatura = next(t for t in d.tables if len(t.columns) == 7)
+    veri = [c.text.strip() for c in fatura.rows[2].cells]      # 2 başlık satırı
+    assert veri[4] == "446.641,18" and veri[5] == "89.328,24"
+    assert veri[6] == ""                                        # Defter Kayıt boş kalır
+
+
+def test_ymm_yazi_vkn_indekslenir(tmp_path):
+    _ymm_yazi_docx_yaz(tmp_path / "oyak.docx", "OYAK ÇİMENTO A.Ş.",
+                       "ANKARA KURUMLAR V.D. – 6120050961")
+    idx = exay.sablonlari_indeksle(str(tmp_path))
+    assert idx["6120050961"][0].endswith("oyak.docx")          # YMM yazısı da indekslenir
+
+
+def test_birlesik_ymm_yazi_bloklara_ayrilir(tmp_path):
+    """Tek dosyada birden çok YMM yazısı → 'Konu: Bilgi İsteme' başlığından bölünür."""
+    import docx
+    from copy import deepcopy
+    from docx.oxml.ns import qn
+    tek = tmp_path / "tek.docx"
+    _ymm_yazi_docx_yaz(tek, "OYAK ÇİMENTO A.Ş.", "ANKARA KURUMLAR V.D. – 6120050961")
+    d = docx.Document(str(tek))
+    body = d.element.body
+    els = [e for e in body if e.tag in (qn('w:p'), qn('w:tbl'))]
+    sect = body.find(qn('w:sectPr'))
+    for e in els:
+        yeni = deepcopy(e)
+        body.insert(list(body).index(sect), yeni) if sect is not None else body.append(yeni)
+    bloklar = exay._docx_firma_bloklari(d)
+    assert len(bloklar) == 2
+    assert all(b["vkn"] == "6120050961" for b in bloklar)
