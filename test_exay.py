@@ -1049,3 +1049,32 @@ def test_birlesik_ymm_yazi_bloklara_ayrilir(tmp_path):
     bloklar = exay._docx_firma_bloklari(d)
     assert len(bloklar) == 2
     assert all(b["vkn"] == "6120050961" for b in bloklar)
+
+
+def test_ymm_yazi_sayi_basligi_silinmez(tmp_path):
+    """YMM yazısında 'Konu: Bilgi İsteme' satırının ÜSTÜNDEKİ 'Sayı :' başlığı,
+    blok izole edilirken düşmemeli (regression: üst kısım siliniyordu)."""
+    import docx
+    yol = tmp_path / "ymm.docx"
+    d = docx.Document()
+    d.add_paragraph("Sayı : YMM 27103572/2026-365          GAZİANTEP")
+    d.add_paragraph("Konu : Bilgi İsteme                    09.03.2026")
+    d.add_paragraph("Sayın, NURULLAH TOSUN")
+    t0 = d.add_table(rows=0, cols=2)
+    for e, v in [("Hakkında Bilgi İstenilen Mükellefin", "Hakkında Bilgi İstenilen Mükellefin"),
+                 ("Ünvanı", "EVYAPAN DEMİR A.Ş."),
+                 ("Vergi Dairesi/Nosu", "ŞEHİTKAMİL V.D. – 3830025675")]:
+        r = t0.add_row().cells
+        r[0].text = e; r[1].text = v
+    t2 = d.add_table(rows=1, cols=7)
+    for c, v in enumerate(["F.TARİHİ", "F. NOSU", "MALIN CİNSİ", "MALIN MİKTARI",
+                           "MATRAH", "KDV", "kdv dahİl toplam"]):
+        t2.rows[0].cells[c].text = v
+    d.save(yol)
+
+    bloklar = exay._docx_firma_bloklari(docx.Document(str(yol)))
+    assert len(bloklar) == 1 and bloklar[0]["ilk"] == 0     # blok belge başından başlar
+    doc0 = exay._docx_blok_belgesi(str(yol), 0)
+    paras = [p.text for p in doc0.paragraphs]
+    assert any(p.strip().startswith("Sayı") for p in paras), "'Sayı :' başlığı silindi"
+    assert any("Konu" in p for p in paras)

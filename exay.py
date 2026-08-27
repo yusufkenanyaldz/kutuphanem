@@ -1389,13 +1389,29 @@ def _docx_firma_bloklari(doc):
     for i, el in enumerate(els):
         if el.tag == qn('w:p'):
             t = _ascii_kucuk(Paragraph(el, doc).text)
-            # Blok başı: karşıt inceleme TUTANAĞI başlığı VEYA YMM yazısının
-            # 'Konu : Bilgi İsteme' satırı (iki belge tipi de tek dosyada olabilir).
-            if (('katma deger' in t and 'karsit inceleme' in t and 'tutana' in t)
-                    or ('konu' in t and 'bilgi isteme' in t)):
+            # Blok başı: karşıt inceleme TUTANAĞI başlığı (belge tepesinde) VEYA
+            # YMM yazısının 'Konu : Bilgi İsteme' satırı. YMM yazısında bu satırın
+            # ÜSTÜNDE 'Sayı :' başlık satırı vardır; blok başını ona geri çekeriz
+            # ki üst başlık (Sayı/tarih) bloktan düşüp silinmesin.
+            if 'katma deger' in t and 'karsit inceleme' in t and 'tutana' in t:
                 bas.append(i)
+            elif 'konu' in t and 'bilgi isteme' in t:
+                j = i
+                for k in range(i - 1, max(i - 4, -1), -1):
+                    if els[k].tag != qn('w:p'):
+                        break
+                    tk = _ascii_kucuk(Paragraph(els[k], doc).text).strip()
+                    if tk.startswith('sayi'):
+                        j = k
+                        break
+                    if tk:                       # 'Sayı' olmayan dolu satıra çarparsak dur
+                        break
+                bas.append(j)
     if not bas:
         bas = [0]
+    else:
+        bas = sorted(set(bas))
+        bas[0] = 0        # ilk bloğu belge başından başlat (antet/boş satır kaybolmasın)
     bloklar = []
     for k, bi in enumerate(bas):
         son = bas[k + 1] if k + 1 < len(bas) else len(els)
