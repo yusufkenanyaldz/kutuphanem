@@ -139,7 +139,7 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `_csv_okuyucu_hazirla` | CSV/TXT için kodlama+ayraç saptar; read_excel ile aynı arayüzde okuyucu döndürür. |
 | `firma_pdf_olustur` / `pdf_destekli` / `_pdf_font_bul` | Opsiyonel PDF kopya (reportlab varsa; Türkçe için Unicode TTF kaydeder). |
 | `_doc_metni_oku` | Eski ikili `.doc`'un ana metnini çıkarır (olefile; WordDocument akışı UTF-16LE, 0x07→tab). Yalnızca okuma. |
-| `sablon_vkn_metinden` / `sablon_vkn_oku` | Tutanak metninden karşı firmanın (vkn, unvan) bilgisini "NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN" bloğundan çıkarır. |
+| `sablon_vkn_metinden` / `_blok_vkn` / `sablon_vkn_oku` | Karşı firmanın (vkn, unvan) bilgisini iki belge tipinden de çıkarır: **karşıt inceleme tutanağı** ("NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN") ve **YMM Bilgi İsteme yazısı** ("Hakkında Bilgi İstenilen Mükellef…"). VKN'yi 'V.D.' çevresinden ayıklar (karışık etiket/telefonla karışmaz). |
 | `_vkn_metinden_ayikla` | Metinden 10-11 haneli VKN/TCKN (boşlukları temizler, 8-9→zfill, yer tutucu geçersiz) — filtreyle aynı normalize. |
 | `sablonlari_indeksle` | Klasördeki `.doc`/`.docx` şablonları VKN→(yol, blok) indeksler. **Çok-firmalı tek `.docx`** (bir dosyada N tutanak) tanınır: her firma bloğu ayrı indekslenir. |
 | `_docx_firma_bloklari` / `_docx_blok_belgesi` / `_sablon_kayitlari` | Birleşik `.docx`'i firma bloklarına ayırır (blok başı = "KATMA DEĞER…TUTANAĞI" başlığı), tek bloğu izole eder, dosyadaki tüm (vkn, unvan, blok) kayıtlarını verir. |
