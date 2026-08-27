@@ -1052,6 +1052,17 @@ def test_birlesik_ymm_yazi_bloklara_ayrilir(tmp_path):
     assert all(b["vkn"] == "6120050961" for b in bloklar)
 
 
+def test_fatura_son_sutun_dahil():
+    # Tutanak son sütunu 'Defter Kayıt' → dahil DEĞİL (boş kalır)
+    assert exay._fatura_son_sutun_dahil(
+        ["FATURANIN", "MALIN", "Defter Kayıt", "Tarihi", "Numarası",
+         "Cinsi", "Miktarı", "Tutarı", "KDV Tutarı", "Tarihi/Nosu"]) is False
+    # YMM yazısı son sütunu 'KDV dahil toplam' → dahil (matrah+kdv)
+    assert exay._fatura_son_sutun_dahil(
+        ["FAT.TARİHİ", "FAT. NOSU", "MALIN CİNSİ", "MALIN MİKTARI",
+         "MATRAH", "KDV", "kdv dahİl toplam"]) is True
+
+
 def test_word_dosya_adi_ilk_uc_kelime_donem():
     # Tutanak: ilk üç kelime + AA-YYYY (VKN yok, numara başta)
     assert exay._word_tutanak_adi(

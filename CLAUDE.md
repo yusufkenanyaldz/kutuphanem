@@ -145,7 +145,7 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `_docx_firma_bloklari` / `_docx_blok_belgesi` / `_sablon_kayitlari` | Birleşik `.docx`'i firma bloklarına ayırır (blok başı = "KATMA DEĞER…TUTANAĞI" başlığı), tek bloğu izole eder, dosyadaki tüm (vkn, unvan, blok) kayıtlarını verir. |
 | `_docx_govde_ekle` / `firmalar_tek_docx` | Doldurulmuş firma docx'lerini tek dosyada (her firma yeni sayfada) birleştirir. |
 | `firma_docx_olustur` / `docx_destekli` | `.docx` şablonu python-docx ile açıp fatura tablosunu doldurur, yeni `.docx` yazar (**Word gerektirmez**). |
-| `firma_word_olustur` / `word_destekli` | Eski `.doc` şablonu Word (COM) ile açıp fatura tablosunu günceller (Windows + Word). |
+| `firma_word_olustur` / `word_destekli` | Eski `.doc` şablonu Word (COM) ile açıp fatura tablosunu günceller (Windows + Word). Word COM'da `Table.Cell(r,c)` satırın KENDİ hücre listesini indeksler (grid değil); birleşik başlık satırlı tutanakta başlık-rol eşlemesi hizayı kaydırır (cins boş kalırdı), bu yüzden COM yolunda KONUMSAL sıra kullanılır ve yalnız son sütun tipe göre (`_fatura_son_sutun_dahil`) doldurulur. |
 | `firma_word_uret` / `sablon_uretilebilir_mi` | Uzantıya göre doğru üreticiyi seçer (.docx→python-docx, .doc→COM); ön koşulu denetler. `inceleme_dayanagi` geçirir. |
 | `_docx_inceleme_dayanagi_yaz` | Tutanaktaki "İNCELEME DAYANAĞI" (sözleşme) değer hücresini günceller — eski şablonun eski yılını otomatik ezer. |
 | `_ascii_kucuk` | Türkçe-güvenli küçük harf/ASCII fold (İ→i). Anahtar-kelime eşleşmelerinde `.lower()` yerine bunu kullan. |
