@@ -1090,6 +1090,14 @@ def _fatura_kolon_rolu(baslik):
         return 'matrah'
     return 'bos'
 
+def _fatura_son_sutun_dahil(basliklar):
+    """Fatura tablosunun SON sütunu 'KDV dahil toplam' mı (YMM yazısı; matrah+kdv
+    yazılır) yoksa 'Defter Kayıt' mı (karşıt inceleme tutanağı; BOŞ kalır)?
+    Word COM yolunda, birleşik başlık satırları sütun hizasını bozduğu için
+    konumsal doldurmada son sütunun tipini bu belirler."""
+    b = _ascii_kucuk(' '.join(basliklar))
+    return ('dahil' in b) or ('toplam' in b and 'defter' not in b)
+
 def _fatura_deger_haritasi(row, kolonlar):
     """Kaynak fatura satırından her rol için hücre metnini üretir (rol → metin).
     matrah/kdv aynı bulucularla; 'dahil' = matrah + kdv (sayısal, sonra TR biçim)."""
@@ -1210,26 +1218,17 @@ def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
 
         _yaz(f"      🧩 Fatura tablosu bulundu (veri {veri_bas}. satırdan başlıyor).", "info")
 
-        # Sütun rollerini başlık satırlarından (1..veri_bas-1) çöz. Table.Cell(r,c)
-        # birleşik hücrelerde bile ilgili sütunun hücresini döndürdüğünden, iki
-        # satırlı 'Defter Kayıt / Tarihi-Nosu' başlığı tek metinde birleşir ve
-        # tutanak (son sütun boş) ile YMM yazısı (son sütun KDV dahil toplam)
-        # doğru ayrışır. Çözülemezse KONUMSAL eşlemeye düşülür.
-        roller = None
-        try:
-            ncol = hedef_tablo.Rows(max(veri_bas - 1, 1)).Cells.Count
-            kol_bas = []
-            for c in range(1, ncol + 1):
-                parc = []
-                for r in range(1, veri_bas):
-                    try:
-                        parc.append(_hucre(hedef_tablo.Cell(r, c)))
-                    except Exception:
-                        pass
-                kol_bas.append(' '.join(parc))
-            roller = [_fatura_kolon_rolu(b) for b in kol_bas]
-        except Exception:
-            roller = None
+        # Fatura sütun sırası tüm gerçek şablonlarda aynıdır:
+        #   Tarih | No | Cins | Miktar | Matrah | KDV | (son sütun)
+        # SON sütun tipe göre değişir: tutanakta 'Defter Kayıt' (BOŞ kalır),
+        # YMM yazısında 'KDV dahil toplam' (matrah+kdv). Word COM'da Table.Cell(r,c)
+        # satırın KENDİ hücre listesini indeksler; birleşik başlık satırlı
+        # tutanakta bu, sütun hizasını kaydırıp 'Cinsi' sütununu 'Defter Kayıt'
+        # sanmasına yol açar (cins boş kalırdı). Bu yüzden COM yolunda başlık-rol
+        # eşlemesi KULLANILMAZ; KONUMSAL sıra kullanılır, yalnız son sütun tipe göre
+        # doldurulur. (docx yolu python-docx birleşik hücreleri açtığından orada
+        # başlık-rol eşlemesi güvenlidir.)
+        son_dahil = _fatura_son_sutun_dahil(basliklar)
 
         # Mevcut veri satırlarını sil (baştaki başlık satırları korunur)
         while hedef_tablo.Rows.Count >= veri_bas:
@@ -1240,8 +1239,9 @@ def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
 
         yazilan = 0
         for _, row in firma_df.iterrows():
-            hucreler = _fatura_satir_hucreleri(row, tum_kolonlar, roller) \
-                       or _word_fatura_satiri(row, tum_kolonlar)
+            h = _fatura_deger_haritasi(row, tum_kolonlar)
+            hucreler = [h['tarih'], h['no'], h['cins'], h['miktar'],
+                        h['matrah'], h['kdv'], h['dahil'] if son_dahil else '']
             yeni = hedef_tablo.Rows.Add()
             try:
                 cells = yeni.Cells
