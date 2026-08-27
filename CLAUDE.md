@@ -283,8 +283,18 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
   kullanıcı bir boş `.docx` şablonu verir; fatura tablosu doldurulur ve bilinen
   ünvan/VKN NEZDİNDE bloğuna yazılır (`_docx_nezdinde_yaz`); kalan firma bilgisini
   kullanıcı girer. Özet/eşleşme raporunda "Boş şablon oluşturuldu" olarak işaretlenir.
-- GUI ayarları artık **sekmeli** (Kriterler / Çıktı / Word Şablon) — büyüyen
-  seçenekler kalabalık yapmasın diye. Türkçe casing için `_ascii_kucuk` kullanılır.
+- GUI **"sakin bordo" tek pencere dikey akış** (sekmeler kaldırıldı): üst şerit →
+  bırak alanı → yan yana **Kriterler** + **Çıktı** kartları → tam genişlik
+  **TUTANAKLARI OLUŞTUR** butonu → **özet metrik kartları** (üretilen/seçilen,
+  gerçek kapsam %, tutanak sayısı) + uyarı şeridi → **açılır işlem günlüğü**
+  (varsayılan KAPALI, `_log_ac_kapa`). Tek aksan rengi `ANA_RENK="#5E1030"`;
+  gövde nötr (`APP`/`KART`/`KENAR`). Kapsam % artık **slider** (`_kapsam_kaydir`,
+  `self.yuzde80` StringVar korunur). Çıktı türü **segmented** (`_segment_sec`);
+  Word Şablon ayarları Çıktı kartında Word/İkisi seçiliyken açılır (`_word_blok_guncelle`).
+  **Akış:** dosya sürükle/seç önce SAKLANIR (`_dosya_sec`), işlem OLUŞTUR ile başlar.
+  Metrikler `dosyalari_isle` sonunda `tamam_cb`'ye 4. argüman (özet sözlüğü) ile
+  gelir; 3-argümanlı eski geri çağrılar TypeError'a düşüp uyumlu kalır.
+  Türkçe casing için `_ascii_kucuk` kullanılır.
 - PDF, GİB şablonuyla birebir değil; **okunur/arşiv** kopyasıdır (resmî dosya
   Excel). Türkçe için bir Unicode TTF (DejaVuSans/Arial) gerekir; yoksa
   Helvetica'ya düşer ve bazı Türkçe karakterler bozulabilir.
