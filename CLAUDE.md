@@ -257,8 +257,11 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - **Çok-firmalı tek `.docx` şablon:** Bir dosyada birçok firmanın tutanağı
   toplanmışsa (her blok "KATMA DEĞER…TUTANAĞI" başlığıyla), program dosyayı
   bloklara ayırıp her firmayı VKN ile ayrı indeksler; üretirken ilgili firmanın
-  bloğunu izole edip fatura tablosunu doldurur. (Şimdilik `.docx`; `.doc` birleşik
-  dosya bölme desteklenmez.)
+  bloğunu izole edip fatura tablosunu doldurur. **Birleşik `.doc`** (eski ikili)
+  ise indeks aşamasında Word (COM) ile bir kez `.docx`'e çevrilir (`_doc_docx_cevir`)
+  ve bloklar oradan okunur; böylece üretim tümüyle test edilmiş `.docx` yolundan
+  gider. (Tekli `.doc` COM ile yerinde düzenlenir; birleşik `.doc` dönüştürme adımı
+  Windows + Word gerektirir ve kullanıcı makinesinde doğrulanmalıdır.)
 - **Word'leri tek dosyada birleştir (`word_tek_dosya`):** opsiyonel; üretilen
   `.docx` tutanaklar tek dosyada (her firma yeni sayfada) toplanır
   (`KARSIT_INCELEME_TUTANAKLAR_DÖNEM.docx`; `firmalar_tek_docx`).

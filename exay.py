@@ -888,19 +888,63 @@ def sablon_vkn_oku(path):
     except Exception:
         return (None, None)
 
+def _metni_bloklara_ayir(metin):
+    """Bir tutanak METNİNİ 'KATMA DEĞER…KARŞIT İNCELEME…TUTANAĞI' başlıklarından
+    bloklara ayırır; her blok bir firma tutanağıdır. Tek/başlıksız metinde tek
+    eleman döner. (Eski ikili .doc'un birleşik olup olmadığını anlamakta kullanılır.)"""
+    ak = _ascii_kucuk(metin)
+    idxs = [m.start() for m in re.finditer(
+        r'katma deger.{0,40}?karsit inceleme.{0,20}?tutana', ak)]
+    if len(idxs) <= 1:
+        return [metin]
+    idxs.append(len(metin))
+    return [metin[idxs[i]:idxs[i + 1]] for i in range(len(idxs) - 1)]
+
+def _doc_docx_cevir(path):
+    """Eski ikili .doc'u Word (COM) ile geçici bir .docx'e çevirir; yolu döndürür.
+    Yalnızca Windows + Word'de çalışır (birleşik .doc'ları bölmek için gerekir);
+    pywin32/Word yoksa RuntimeError yükseltir. Şablonun aslı değişmez."""
+    try:
+        import win32com.client as win32
+    except Exception:
+        raise RuntimeError("Word otomasyonu yok (birleşik .doc'u bölmek için gerekli)")
+    import tempfile
+    hedef = os.path.join(tempfile.mkdtemp(prefix='exay_'), Path(path).stem + '.docx')
+    word = win32.DispatchEx("Word.Application"); word.Visible = False
+    try:
+        try: word.DisplayAlerts = 0
+        except Exception: pass
+        d = word.Documents.Open(os.path.abspath(path), ReadOnly=True)
+        d.SaveAs(os.path.abspath(hedef), FileFormat=16)   # 16 = wdFormatDocumentDefault (.docx)
+        d.Close(SaveChanges=False)
+    finally:
+        try: word.Quit()
+        except Exception: pass
+    return hedef
+
 def _sablon_kayitlari(path):
-    """Bir şablon dosyasındaki TÜM firma kayıtlarını [(vkn, unvan, blok)] döndürür.
-    Bir .docx dosyası birden çok firma tutanağı içerebilir (her blok ayrı firma;
-    blok = 0-tabanlı indeks). Eski ikili .doc tek firmalıdır (blok=None)."""
+    """Bir şablon dosyasındaki TÜM firma kayıtlarını [(vkn, unvan, blok, üretim_yolu)]
+    döndürür. Çok firmalı .docx → her blok ayrı (blok=indeks). Tek .doc → (blok=None).
+    Birleşik .doc (birden çok tutanak) → Word ile .docx'e çevrilir ve bloklar oradan
+    okunur (üretim_yolu geçici .docx olur; üretim böylece test edilmiş .docx yolundan gider)."""
     p = str(path)
     try:
         if p.lower().endswith('.docx'):
             import docx
             bloklar = _docx_firma_bloklari(docx.Document(p))
-            return [(b['vkn'], b['unvan'], k)
+            return [(b['vkn'], b['unvan'], k, p)
                     for k, b in enumerate(bloklar) if b['vkn']]
-        vkn, unvan = sablon_vkn_metinden(_doc_metni_oku(p))
-        return [(vkn, unvan, None)] if vkn else []
+        # .doc
+        metin = _doc_metni_oku(p)
+        if len(_metni_bloklara_ayir(metin)) <= 1:
+            vkn, unvan = sablon_vkn_metinden(metin)
+            return [(vkn, unvan, None, p)] if vkn else []
+        # Birleşik .doc → .docx'e çevir, blokları oradan indeksle
+        dx = _doc_docx_cevir(p)
+        import docx
+        bloklar = _docx_firma_bloklari(docx.Document(dx))
+        return [(b['vkn'], b['unvan'], k, dx)
+                for k, b in enumerate(bloklar) if b['vkn']]
     except Exception:
         return []
 
@@ -933,11 +977,11 @@ def sablonlari_indeksle(klasor, log_cb=None):
         kayitlar = _sablon_kayitlari(str(p))
         if len(kayitlar) > 1:
             coklu += 1
-        for vkn, unvan, blok in kayitlar:
+        for vkn, unvan, blok, yol in kayitlar:
             if vkn in idx and log_cb:
                 log_cb(f"  ⚠️  Aynı VKN ({vkn}) için birden çok kayıt; sonuncusu "
                        f"kullanılacak: {p.name}", "warn")
-            idx[vkn] = (str(p), blok)
+            idx[vkn] = (yol, blok)
     if coklu and log_cb:
         log_cb(f"  🧩 {coklu} dosya çok-firmalı (tek Word'de birden çok tutanak) "
                f"olarak tanındı; her firma ayrı ayrı eşleştirildi.", "info")
