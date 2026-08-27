@@ -258,7 +258,14 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
   toplanmışsa (her blok "KATMA DEĞER…TUTANAĞI" başlığıyla), program dosyayı
   bloklara ayırıp her firmayı VKN ile ayrı indeksler; üretirken ilgili firmanın
   bloğunu izole edip fatura tablosunu doldurur. (Şimdilik `.docx`; `.doc` birleşik
-  dosya bölme desteklenmez.) Çıktıları tek dosyada toplama: `firmalar_tek_docx`.
+  dosya bölme desteklenmez.)
+- **Word'leri tek dosyada birleştir (`word_tek_dosya`):** opsiyonel; üretilen
+  `.docx` tutanaklar tek dosyada (her firma yeni sayfada) toplanır
+  (`KARSIT_INCELEME_TUTANAKLAR_DÖNEM.docx`; `firmalar_tek_docx`).
+- **Boş/yedek şablon (`bos_sablon`):** eşleşmeyen (şablonu olmayan) firmalar için
+  kullanıcı bir boş `.docx` şablonu verir; fatura tablosu doldurulur ve bilinen
+  ünvan/VKN NEZDİNDE bloğuna yazılır (`_docx_nezdinde_yaz`); kalan firma bilgisini
+  kullanıcı girer. Özet/eşleşme raporunda "Boş şablon oluşturuldu" olarak işaretlenir.
 - GUI ayarları artık **sekmeli** (Kriterler / Çıktı / Word Şablon) — büyüyen
   seçenekler kalabalık yapmasın diye. Türkçe casing için `_ascii_kucuk` kullanılır.
 - PDF, GİB şablonuyla birebir değil; **okunur/arşiv** kopyasıdır (resmî dosya
