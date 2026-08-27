@@ -803,7 +803,7 @@ def test_docx_coklu_firma_kayitlari(tmp_path):
     _docx_coklu_yaz(yol, [("FIRMA A", "V.D. 1234567890"),
                           ("FIRMA B", "V.D. 9876543210")])
     kayit = exay._sablon_kayitlari(str(yol))
-    vknler = {v: b for v, u, b in kayit}
+    vknler = {v: b for v, u, b, y in kayit}
     assert vknler == {"1234567890": 0, "9876543210": 1}   # iki firma, blok 0/1
     idx = exay.sablonlari_indeksle(str(tmp_path))
     assert idx["1234567890"] == (str(yol), 0)
@@ -897,3 +897,25 @@ def test_bos_sablon_eslesmeyen_firma(tmp_path):
     wb = openpyxl.load_workbook(rap); ws = wb.active
     durumlar = {ws.cell(r, 1).value: ws.cell(r, 3).value for r in range(2, ws.max_row + 1)}
     assert "Boş şablon" in str(durumlar.get("1000000002", ""))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Birleşik .doc tanıma (metin bölme) — üretim COM gerektirir, burada tanıma test
+# ══════════════════════════════════════════════════════════════════════════
+def test_metni_bloklara_ayir():
+    tek = _tutanak_metni("FIRMA A", "V.D. 1234567890")
+    assert len(exay._metni_bloklara_ayir(tek)) == 1
+    ikili = _tutanak_metni("FIRMA A", "V.D. 1234567890") + \
+            _tutanak_metni("FIRMA B", "V.D. 9876543210")
+    bloklar = exay._metni_bloklara_ayir(ikili)
+    assert len(bloklar) == 2
+    assert exay.sablon_vkn_metinden(bloklar[0])[0] == "1234567890"
+    assert exay.sablon_vkn_metinden(bloklar[1])[0] == "9876543210"
+
+
+def test_sablon_kayitlari_doc_tekli(monkeypatch, tmp_path):
+    p = tmp_path / "tek.doc"; p.write_bytes(b"stub")
+    monkeypatch.setattr(exay, "_doc_metni_oku",
+                        lambda x: _tutanak_metni("FIRMA A", "V.D. 1234567890"))
+    kayit = exay._sablon_kayitlari(str(p))
+    assert kayit == [("1234567890", kayit[0][1], None, str(p))]   # tek firma, blok None
