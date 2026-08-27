@@ -848,3 +848,52 @@ def test_docx_coklu_uctan_uca(tmp_path):
     uretilen = sorted(p.name for p in (tmp_path / "Hazır Tutanaklar").glob("*.docx"))
     assert any("1000000001" in n for n in uretilen)   # A tek dosyadan bulundu
     assert any("1000000002" in n for n in uretilen)   # B tek dosyadan bulundu
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Tek dosyada birleştirme (word_tek_dosya) + boş/yedek şablon (bos_sablon)
+# ══════════════════════════════════════════════════════════════════════════
+def test_word_tek_dosya_birlestirme(tmp_path):
+    import docx
+    yol = tmp_path / "NISAN_2026.xlsx"
+    _yeni_gib_yaz(yol)   # A=1000000001, B=1000000002 seçilir
+    sk = tmp_path / "sablonlar"; sk.mkdir()
+    _docx_sablon_yaz(sk / "a.docx", "FIRMA A", "V.D. 1000000001")
+    _docx_sablon_yaz(sk / "b.docx", "FIRMA B", "V.D. 1000000002")
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        sablon_klasor=str(sk), cikti_turu='word', word_tek_dosya=True)
+    kl = tmp_path / "Hazır Tutanaklar"
+    birlesik = list(kl.glob("KARSIT_INCELEME_TUTANAKLAR_*.docx"))
+    assert len(birlesik) == 1                              # tek birleşik dosya
+    # ayrı firma .docx'i OLMAMALI
+    assert not [p for p in kl.glob("*.docx") if p.name[0].isdigit()]
+    d = docx.Document(str(birlesik[0]))
+    fat = [t for t in d.tables if len(t.columns) == 7]
+    assert len(fat) == 2                                   # A ve B blokları tek dosyada
+
+
+def test_bos_sablon_eslesmeyen_firma(tmp_path):
+    import docx
+    yol = tmp_path / "NISAN_2026.xlsx"
+    _yeni_gib_yaz(yol)   # A=1000000001, B=1000000002
+    sk = tmp_path / "sablonlar"; sk.mkdir()
+    _docx_sablon_yaz(sk / "a.docx", "FIRMA A", "V.D. 1000000001")   # yalnızca A'nın şablonu
+    bos = tmp_path / "bos.docx"
+    _docx_sablon_yaz(bos, "", "")                          # boş NEZDİNDE (ünvan/vd yok)
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        sablon_klasor=str(sk), cikti_turu='word', bos_sablon=str(bos))
+    kl = tmp_path / "Hazır Tutanaklar"
+    # B için boş şablondan üretilmiş bir dosya olmalı
+    b_dosya = [p for p in kl.glob("*.docx") if "1000000002" in p.name]
+    assert b_dosya, "Boş şablondan B tutanağı üretilmedi"
+    d = docx.Document(str(b_dosya[0]))
+    metin = "\n".join("\t".join(c.text.strip() for c in r.cells)
+                      for t in d.tables for r in t.rows)
+    vkn, unvan = exay.sablon_vkn_metinden(metin)
+    assert vkn == "1000000002"                            # bilinen VKN yazıldı
+    assert unvan == "FIRMA B"                             # bilinen ünvan yazıldı
+    # WORD_ESLESME raporunda "Boş şablon" durumu geçmeli
+    rap = list(kl.glob("WORD_ESLESME_*.xlsx"))[0]
+    wb = openpyxl.load_workbook(rap); ws = wb.active
+    durumlar = {ws.cell(r, 1).value: ws.cell(r, 3).value for r in range(2, ws.max_row + 1)}
+    assert "Boş şablon" in str(durumlar.get("1000000002", ""))
