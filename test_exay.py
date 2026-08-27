@@ -919,3 +919,29 @@ def test_sablon_kayitlari_doc_tekli(monkeypatch, tmp_path):
                         lambda x: _tutanak_metni("FIRMA A", "V.D. 1234567890"))
     kayit = exay._sablon_kayitlari(str(p))
     assert kayit == [("1234567890", kayit[0][1], None, str(p))]   # tek firma, blok None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  İkinci belge tipi: YMM 'Bilgi İsteme' yazısı (Hakkında Bilgi İstenilen Mükellef)
+# ══════════════════════════════════════════════════════════════════════════
+def test_ymm_yazisi_vkn_eslesme():
+    # Etiketler karışık olabilir (Adresi hücresinde V.D./VKN) ve telefon var
+    metin = (
+        "Sayı : YMM 27103572/2026-363\tGAZİANTEP\n"
+        "İade Talebinde Bulunan Firma\t\tUnvanı\tİNALOĞLU İNŞAAT\t\t"
+        "Adresi\tŞAHİNBEY / 475 056 9431\t\tTelefon/Fax\t0 342 502 03 15\n"
+        "Hakkında Bilgi İstenilen Mükellefin Altı\t\t"
+        "Ünvanı\tOYAK ÇİMENTO FABRİKALARI ANONİM ŞİRKETİ\t\t"
+        "Adresi\tANKARA KURUMLAR V.D. – 6120050961\t\t"
+        "Vergi Dairesi/Hesap Nosu\tÇUKURAMBAR MAH. 1480 SK.\t\t"
+        "Telefon/Fax\t0 312 220 0290\n"
+        "İNCELEME DAYANAĞI\t31.01.2026 Tarih ve 09 Sayılı\n"
+    )
+    vkn, unvan = exay.sablon_vkn_metinden(metin)
+    assert vkn == "6120050961"          # karşı firma (telefon 03122200290 DEĞİL)
+    assert "OYAK" in unvan
+
+
+def test_blok_vkn_telefon_karistirmaz():
+    blok = "Ünvanı\tX A.Ş.\tTelefon/Fax\t0 342 215 10 70\tVergi Dairesi\tŞAHİNBEY V.D. 6190914983"
+    assert exay._blok_vkn(blok) == "6190914983"

@@ -858,21 +858,51 @@ def _vkn_metinden_ayikla(s):
             en_iyi = d   # blok içindeki son geçerli kimlik (karşı firma hücresi)
     return en_iyi
 
+def _blok_vkn(blok):
+    """Karşı firma bloğundan VKN/TCKN ayıklar. Telefonla karışmaması için önce
+    'V.D.' / 'Vergi Dairesi' / 'Kurumlar V.D.' civarındaki numarayı arar (bazı
+    şablonlarda etiketler karışık olduğundan bu daha güvenilir); bulamazsa son
+    çare olarak bloktaki geçerli ilk kimliği alır."""
+    for m in re.finditer(
+            r'(?:[Vv]\.?\s*[Dd]\.?|[Vv]ergi\s*[Dd]airesi|[Kk]urumlar)'
+            r'\s*[–\-/:.]*\s*([0-9][0-9 ]{7,14}[0-9])', blok):
+        n = _vkn_metinden_ayikla(m.group(1))
+        if n:
+            return n
+    # Son çare: telefon/faks satırlarını dışla, kalan ilk geçerli kimliği al
+    for satir in blok.split('\n'):
+        if re.search(r'tel|faks|fax', satir, re.I):
+            continue
+        n = _vkn_metinden_ayikla(satir)
+        if n:
+            return n
+    return None
+
 def sablon_vkn_metinden(metin):
-    """Tutanak metninden karşı firmanın (vkn, unvan) bilgisini çıkarır.
-    Anahtar: 'NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN' bloğu. Bulunamazsa
-    (None, None) — ör. standart tutanak olmayan üst yazılar."""
+    """Bir tutanak/yazı metninden karşı firmanın (vkn, unvan) bilgisini çıkarır.
+    İki belge tipini de tanır:
+      • Karşıt inceleme tutanağı → 'NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN'
+      • YMM Bilgi İsteme yazısı  → 'Hakkında Bilgi İstenilen Mükellef…'
+    Bulunamazsa (None, None)."""
     m = re.search(
-        r'NEZD[İIı]NDE\s+KAR[ŞSş]IT\s+[İIı]NCELEME\s+YAPILAN\s+F[İIı]RMANIN(.*?)'
-        r'(?:[İIı]NCELEME\s+DAYANA|Kar[şs]ıt\s+İncelemeye|$)',
+        r'(?:NEZD[İIı]NDE\s+KAR[ŞSş]IT\s+[İIı]NCELEME\s+YAPILAN\s+F[İIı]RMANIN'
+        r'|HAKKINDA\s+B[İIı]LG[İIı]\s+[İIı]STEN[İIı]LEN\s+M[ÜUü]KELLEF[İIı]?[^\t\n]*)'
+        r'(.*?)'
+        r'(?:[İIı]NCELEME\s+DAYANA|[İIı]STEN[İIı]LEN\s+B[İIı]LG[İIı]LER'
+        r'|Kar[şs]ıt\s+İncelemeye|$)',
         metin, re.S | re.I)
     if not m:
         return (None, None)
     blok = m.group(1)
     unv = re.search(r'Ünvan[ıi]\s*\t+([^\t\n]+)', blok)
+    if not unv:
+        unv = re.search(r'[ÜUü]nvan[ıi]\s*\t+([^\t\n]+)', blok)
     unvan = unv.group(1).strip() if unv else None
+    # Önce doğru etiketli hücre; olmazsa 'V.D.' çevresinden ayıkla (karışık etiket)
     vd = re.search(r'Vergi\s*Dairesi\s*/?\s*Nosu\s*\t+([^\t\n]+)', blok)
     vkn = _vkn_metinden_ayikla(vd.group(1)) if vd else None
+    if not vkn:
+        vkn = _blok_vkn(blok)
     return (vkn, unvan)
 
 def sablon_vkn_oku(path):
