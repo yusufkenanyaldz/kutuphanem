@@ -1001,17 +1001,6 @@ def _ymm_yazi_docx_yaz(yol, unvan, vd_hucre):
     d.save(yol)
 
 
-def test_fatura_kolon_rolu_iki_tip():
-    # Tutanak: son sütun 'Defter Kayıt' → boş; YMM: 'KDV dahil toplam' → dahil
-    assert exay._fatura_kolon_rolu("Defter Kayıt Tarihi/Nosu") == "bos"
-    assert exay._fatura_kolon_rolu("kdv dahİl toplam") == "dahil"
-    assert exay._fatura_kolon_rolu("FATURANIN Tarihi") == "tarih"
-    assert exay._fatura_kolon_rolu("FAT. NOSU") == "no"
-    assert exay._fatura_kolon_rolu("MALIN KDV Tutarı") == "kdv"
-    assert exay._fatura_kolon_rolu("MATRAH") == "matrah"
-    assert exay._fatura_kolon_rolu("MALIN Miktarı") == "miktar"
-
-
 def _ornek_firma_df():
     kols = ["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su",
             "Alınan Mal ve/veya Hizmetin Cinsi", "Alınan Mal ve/veya Hizmetin Miktarı",
@@ -1033,6 +1022,9 @@ def test_ymm_yazi_fatura_kdv_dahil_toplam(tmp_path):
     fatura = next(t for t in d.tables if len(t.columns) == 7)
     veri = [c.text.strip() for c in fatura.rows[1].cells]      # tek başlık satırı
     assert veri[0] == "08.01.2026"
+    assert veri[1] == "TC42026000001608"                        # fatura no
+    assert veri[2] == "HAZIR BETON"                             # CİNS dolu (boş kalmamalı!)
+    assert veri[3] == "302 M3"                                  # miktar
     assert veri[4] == "446.641,18"                              # matrah
     assert veri[5] == "89.328,24"                               # kdv
     assert veri[6] == "535.969,42"                              # KDV dahil toplam = matrah+kdv
@@ -1048,8 +1040,44 @@ def test_tutanak_defter_kayit_bos(tmp_path):
     d = docx.Document(str(cikti))
     fatura = next(t for t in d.tables if len(t.columns) == 7)
     veri = [c.text.strip() for c in fatura.rows[2].cells]      # 2 başlık satırı
+    assert veri[0] == "08.01.2026"
+    assert veri[1] == "TC42026000001608"                        # fatura no
+    assert veri[2] == "HAZIR BETON"                             # CİNS dolu (boş kalmamalı!)
+    assert veri[3] == "302 M3"                                  # miktar
     assert veri[4] == "446.641,18" and veri[5] == "89.328,24"
     assert veri[6] == ""                                        # Defter Kayıt boş kalır
+
+
+def test_fatura_fazla_sutun_proto_sizmaz_ve_uyarir(tmp_path):
+    """Beklenenden fazla sütunlu (8) bir fatura tablosunda: proto satırın örnek
+    verisi çıktıya SIZMAMALI (fazla sütun boşaltılır) ve kullanıcı uyarılmalı."""
+    import docx
+    yol = tmp_path / "sekiz.docx"
+    d = docx.Document()
+    # NEZDİNDE bloğu (indeks/başlık için) + 8 sütunlu fatura tablosu
+    t0 = d.add_table(rows=0, cols=2)
+    for e, v in [("NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN",
+                  "NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN"),
+                 ("Ünvanı", "TEST A.Ş."), ("Vergi Dairesi/Nosu", "V.D. 1234567890")]:
+        r = t0.add_row().cells; r[0].text = e; r[1].text = v
+    t2 = d.add_table(rows=3, cols=8)
+    b0 = ["FATURANIN","FATURANIN","MALIN","MALIN","MALIN","MALIN","Defter Kayıt","Ekstra"]
+    b1 = ["Tarihi","Numarası","Cinsi","Miktarı","Tutarı","KDV Tutarı","Tarihi/Nosu","Ekstra"]
+    proto = ["x","x","x","x","x","x","x","SIZINTI"]              # proto satırın 8. hücresi
+    for c, v in enumerate(b0): t2.rows[0].cells[c].text = v
+    for c, v in enumerate(b1): t2.rows[1].cells[c].text = v
+    for c, v in enumerate(proto): t2.rows[2].cells[c].text = v
+    d.save(yol)
+
+    firma, kols = _ornek_firma_df()
+    uyarilar = []
+    doc, y = exay._firma_docx_hazirla(str(yol), firma, kols,
+                                      log_cb=lambda m, t='': uyarilar.append((m, t)))
+    fatura = next(t for t in doc.tables if len(t.columns) == 8)
+    veri = [c.text.strip() for c in fatura.rows[2].cells]
+    assert veri[2] == "HAZIR BETON"                              # cins yine doğru yerde
+    assert veri[7] == ""                                         # proto 'SIZINTI' temizlendi
+    assert any("sütun" in m.lower() for m, t in uyarilar)        # sütun sayısı uyarısı verildi
 
 
 def test_ymm_yazi_vkn_indekslenir(tmp_path):
