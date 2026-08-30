@@ -171,6 +171,10 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
   okuma+yazma). **Opsiyonel:** `reportlab` (PDF kopya), `pywin32` (yalnızca eski
   `.doc` şablonlardan üretim — Windows + Word; `.docx` şablonlar Word'süz üretilir).
   Tkinter standart kütüphanede. Testler için: `pytest`.
+- **Sürümler `requirements.txt`'te ARALIKLA sabit** (`>=test edilmiş, <sonraki ana
+  sürüm`): `pip install -r requirements.txt` ileride sürpriz bir büyük güncellemeyle
+  programı bozmaz, ama yama/küçük güncellemeleri alır. Üst sınırı yükseltmeden önce
+  `pytest -q` çalıştır. (Pillow LANCZOS kodu hem eski hem yeni Pillow'u destekler.)
 - Kullanıcı ayarları (son eşik/yüzde, **çıktı klasörü, PDF tercihi**)
   `~/.exay_ayarlar.json` içinde saklanır (Program Files gibi yazılamayan
   konumlarda sorun çıkmasın diye).

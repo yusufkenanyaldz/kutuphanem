@@ -1,15 +1,21 @@
 # e-YMM Karşıt İnceleme Asistanı — bağımlılıklar
-pandas
-openpyxl
-xlrd          # eski .xls dosyaları için
-pillow        # GUI logosu için
+#
+# Sürümler ARALIKLA sabitlendi: alt sınır = test edilmiş, yaygın kararlı sürüm;
+# üst sınır = bir sonraki ANA sürüm (major) — böylece `pip install -r requirements.txt`
+# ileride sürpriz bir büyük güncellemeyle programı bozmaz, ama küçük/yama
+# güncellemelerini (hata düzeltmeleri) alabilir. Yeni bir sürüme geçmeden önce
+# `pytest -q` ile 84 testi çalıştırın.
 
-olefile       # hazır .doc (eski ikili) şablonlardan VKN okuma
-python-docx   # .docx şablon okuma VE yazma (Word gerektirmeden tutanak üretir)
+pandas>=1.5,<4          # liste okuma/gruplama (read_excel, DataFrame, groupby)
+openpyxl>=3.0,<4        # .xlsx okuma/yazma (tutanak + yan raporlar)
+xlrd>=2.0,<3            # yalnızca eski .xls okuma (2.x sadece .xls destekler — kasıtlı)
+pillow>=9.1,<14         # GUI logosu (Image.thumbnail/LANCZOS — kod iki sürümü de destekler)
+olefile>=0.46,<1        # hazır .doc (eski ikili) şablonlardan VKN okuma
+python-docx>=0.8.11,<2  # .docx şablon okuma VE yazma (Word gerektirmeden tutanak üretir)
 
 # Opsiyonel — kurulu değilse program çalışır, sadece ilgili özellik devre dışı:
-reportlab     # "PDF kopya da üret" seçeneği için
-pywin32 ; platform_system == "Windows"   # yalnızca eski .doc şablonlardan üretim için (Windows + Word)
+reportlab>=3.6,<6                         # "PDF kopya da üret" seçeneği için
+pywin32>=305 ; platform_system == "Windows"   # yalnız eski .doc şablonlardan üretim (Windows + Word)
 
 # Geliştirme / test:
-pytest
+pytest>=7,<10
