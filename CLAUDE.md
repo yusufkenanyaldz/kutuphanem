@@ -145,13 +145,13 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `_docx_firma_bloklari` / `_docx_blok_belgesi` / `_sablon_kayitlari` | Birleşik `.docx`'i firma bloklarına ayırır (blok başı = "KATMA DEĞER…TUTANAĞI" başlığı), tek bloğu izole eder, dosyadaki tüm (vkn, unvan, blok) kayıtlarını verir. |
 | `_docx_govde_ekle` / `firmalar_tek_docx` | Doldurulmuş firma docx'lerini tek dosyada (her firma yeni sayfada) birleştirir. |
 | `firma_docx_olustur` / `docx_destekli` | `.docx` şablonu python-docx ile açıp fatura tablosunu doldurur, yeni `.docx` yazar (**Word gerektirmez**). |
-| `firma_word_olustur` / `word_destekli` | Eski `.doc` şablonu Word (COM) ile açıp fatura tablosunu günceller (Windows + Word). Word COM'da `Table.Cell(r,c)` satırın KENDİ hücre listesini indeksler (grid değil); birleşik başlık satırlı tutanakta başlık-rol eşlemesi hizayı kaydırır (cins boş kalırdı), bu yüzden COM yolunda KONUMSAL sıra kullanılır ve yalnız son sütun tipe göre (`_fatura_son_sutun_dahil`) doldurulur. |
+| `firma_word_olustur` / `word_destekli` | Eski `.doc` şablonu Word (COM) ile açıp fatura tablosunu günceller (Windows + Word). Konumsal doldurur (aşağıya bakın). |
 | `firma_word_uret` / `sablon_uretilebilir_mi` | Uzantıya göre doğru üreticiyi seçer (.docx→python-docx, .doc→COM); ön koşulu denetler. `inceleme_dayanagi` geçirir. |
 | `_docx_inceleme_dayanagi_yaz` | Tutanaktaki "İNCELEME DAYANAĞI" (sözleşme) değer hücresini günceller — eski şablonun eski yılını otomatik ezer. |
 | `_ascii_kucuk` | Türkçe-güvenli küçük harf/ASCII fold (İ→i). Anahtar-kelime eşleşmelerinde `.lower()` yerine bunu kullan. |
 | `_docx_metni_oku` | `.docx` metnini (paragraf + tablo hücreleri, sekmeli) çıkarır — VKN okuma için. |
 | `_word_fatura_satiri` / `_fatura_tablosu_mu` / `_tr_para_str` | Fatura satırını Word tablo sırasına çevirir (KONUMSAL yedek); fatura tablosunu başlığından tanır (tutanak *ve* YMM yazısı); TR para biçimi. |
-| `_fatura_kolon_rolu` / `_fatura_kolon_basliklari` / `_fatura_deger_haritasi` / `_fatura_satir_hucreleri` | **Başlığa göre** sütun eşleme: her sütunun başlığından rol (tarih/no/cins/miktar/matrah/kdv/**dahil**/bos) çıkarır. Böylece tutanağın son sütunu 'Defter Kayıt' **boş** kalır, YMM yazısının 'KDV dahil toplam' sütunu **matrah+kdv** ile dolar. Başlıklar güvenilmezse `_word_fatura_satiri` konumsal yola düşülür. |
+| `_fatura_deger_haritasi` / `_fatura_son_sutun_dahil` | Fatura doldurmanın TEK yöntemi: **KONUMSAL**. Sütun sırası tüm gerçek şablonlarda sabit (`Tarih\|No\|Cins\|Miktar\|Matrah\|KDV\|son`); `_fatura_deger_haritasi` rol→değer üretir, satır konumsal yazılır. SON sütun `_fatura_son_sutun_dahil` ile tipe göre: tutanak 'Defter Kayıt' **boş**, YMM 'KDV dahil toplam' **matrah+kdv**. **Hem `.docx` hem `.doc`/COM yolu aynı mantığı** kullanır — başlığa göre rol tahmini KULLANILMAZ (kırılgandı; cins boş kalıyordu). |
 | `_gecersizlik_nedeni` | Geçersiz VKN için insan-okur neden metni. |
 | `firmalari_filtrele` | **KALP.** VKN normalize, geçerli/geçersiz ayrım, 2 aşamalı %80 seçimi. |
 | `guvenli_kaydet` | Windows uzun yol (~260) sorununda dosya adını kısaltarak yeniden kaydeder. |
@@ -190,7 +190,7 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 yöntemini otomatikleştirir). Çalıştırma:
 
 ```bash
-pytest -q        # 43 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
+pytest -q        # 81 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
                  # VKN normalizasyon, üç liste tipi (yeni/eski GİB + muhasebe),
                  # CSV okuma, kriter doğrulama, doğruluk uyarıları (kdv/mükerrer/
                  # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca
@@ -235,7 +235,7 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - Geçersiz kimlikli satırlar tutanaklanamaz; kullanıcı kaynak listede
   düzeltirse kapsam iyileşir (program uyarıyor).
 - ~~GUI'de ilerleme çubuğu yok~~ → **eklendi** (firma sayısına göre dolar).
-- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 43 test).
+- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 81 test).
 - ~~İşlem öncesi önizleme/uyarı yok~~ → **eklendi** (ÖN BİLGİ bloğu + KDV
   tutarlılık, mükerrer fatura, dönem-dışı tarih uyarıları — hepsi yalnızca
   uyarır, seçimi/iş kuralını etkilemez).
@@ -265,7 +265,7 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
   inceleme tutanağı* ("NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN", son sütun
   'Defter Kayıt') ve (b) *YMM Bilgi İsteme yazısı* ("Hakkında Bilgi İstenilen
   Mükellef", son sütun 'KDV dahil toplam'). VKN okuma (`sablon_vkn_metinden` +
-  `_blok_vkn`) ve fatura doldurma (`_fatura_kolon_rolu` başlık-eşlemesi) ikisini
+  `_blok_vkn`) ve fatura doldurma (konumsal + `_fatura_son_sutun_dahil`) ikisini
   de tanır; blok bölme (`_docx_firma_bloklari`, `_metni_bloklara_ayir`) her iki
   başlığı da blok başı sayar, karşı-taraf tablosunu her iki başlıktan bulur.
 - **Çok-firmalı tek `.docx` şablon:** Bir dosyada birçok firmanın tutanağı/yazısı
