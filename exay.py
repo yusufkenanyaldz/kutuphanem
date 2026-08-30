@@ -554,17 +554,26 @@ def firmalari_filtrele(df, esik_tek, esik_toplam, yuzde80, log_cb):
 # ══════════════════════════════════════════
 #  EXCEL ÜRETME — Sistemin şablonu birebir
 # ══════════════════════════════════════════
+def _dosya_kilitli_mesaji(yol):
+    """Dosya başka programda açık olduğunda gösterilecek net Türkçe mesaj."""
+    return (f"'{Path(yol).name}' kaydedilemedi — dosya büyük olasılıkla "
+            f"Excel/Word'de AÇIK. Lütfen bu dosyayı kapatıp tekrar deneyin. "
+            f"(Klasör salt-okunur ise yazma izni de gerekebilir.)")
+
 def guvenli_kaydet(wb, tam_yol):
     """Excel'i kaydeder. Windows'ta yol çok uzunsa (~260 karakter MAX_PATH sınırı)
     veya dosya adı geçersizse, adı kısaltarak yeniden dener; böylece uzun ünvanlı
     firmalarda dosya oluşturulamayıp numara atlaması yaşanmaz.
-    Kaydedilen gerçek yolu döndürür."""
+    Dosya başka programda AÇIKSA (PermissionError) net Türkçe mesajla yükseltir —
+    farklı adla sessizce kaydedip kullanıcıyı yanıltmaz. Kaydedilen gerçek yolu döndürür."""
     yol    = Path(tam_yol)
     klasor = yol.parent
     stem   = yol.stem              # "N) 07_2026_VKN_UNVAN" (baştaki numara benzersizdir)
     # 1) Olduğu gibi dene
     try:
         wb.save(str(yol)); return str(yol)
+    except PermissionError:
+        raise PermissionError(_dosya_kilitli_mesaji(yol))   # açık dosya → net mesaj
     except Exception:
         pass
     # 2) Adı kısaltarak dene — baştaki "N) dönem_VKN" korunur, uzun ünvan kısalır
@@ -573,6 +582,8 @@ def guvenli_kaydet(wb, tam_yol):
             kisa = stem[:uzunluk].rstrip(' ._-')
             yeni = klasor / f"{kisa}.xlsx"
             wb.save(str(yeni)); return str(yeni)
+        except PermissionError:
+            raise PermissionError(_dosya_kilitli_mesaji(yeni))
         except Exception:
             continue
     # 3) Windows uzun-yol ön eki ile son bir deneme
@@ -580,10 +591,15 @@ def guvenli_kaydet(wb, tam_yol):
         try:
             uzun_pref = '\\\\?\\' + os.path.abspath(str(yol))
             wb.save(uzun_pref); return str(yol)
+        except PermissionError:
+            raise PermissionError(_dosya_kilitli_mesaji(yol))
         except Exception:
             pass
     # Hiçbiri olmadıysa hatayı çağırana bildir
-    wb.save(str(yol))
+    try:
+        wb.save(str(yol))
+    except PermissionError:
+        raise PermissionError(_dosya_kilitli_mesaji(yol))
     return str(yol)
 
 
@@ -1278,6 +1294,8 @@ def _guvenli_docx_kaydet(doc, tam_yol):
     yol = Path(tam_yol); klasor = yol.parent; stem = yol.stem
     try:
         doc.save(str(yol)); return str(yol)
+    except PermissionError:
+        raise PermissionError(_dosya_kilitli_mesaji(yol))   # açık dosya → net mesaj
     except Exception:
         pass
     for uzunluk in (80, 60, 40, 25, 15):
@@ -1285,9 +1303,14 @@ def _guvenli_docx_kaydet(doc, tam_yol):
             kisa = stem[:uzunluk].rstrip(' ._-')
             yeni = klasor / f"{kisa}.docx"
             doc.save(str(yeni)); return str(yeni)
+        except PermissionError:
+            raise PermissionError(_dosya_kilitli_mesaji(yeni))
         except Exception:
             continue
-    doc.save(str(yol)); return str(yol)   # son deneme (hatayı çağırana bildirir)
+    try:
+        doc.save(str(yol)); return str(yol)   # son deneme
+    except PermissionError:
+        raise PermissionError(_dosya_kilitli_mesaji(yol))
 
 def _docx_hucre_yaz(cell, metin):
     """Hücreye metni yazar; mevcut paragraf biçimini (hizalama/stil) ve varsa ilk
@@ -1993,7 +2016,7 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                 wsw.column_dimensions['A'].width = 16
                 wsw.column_dimensions['B'].width = 45
                 wsw.column_dimensions['C'].width = 26
-                wbw.save(wyol)
+                guvenli_kaydet(wbw, wyol)
                 log_cb(f"🗂  Şablon eşleşme raporu: WORD_ESLESME_{donem.replace('.','_')}.xlsx", "ok")
             except Exception as e:
                 log_cb(f"⚠️ Şablon eşleşme raporu yazılamadı: {e}", "warn")
@@ -2017,7 +2040,7 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                 wsh.column_dimensions['A'].width = 16
                 wsh.column_dimensions['B'].width = 45
                 wsh.column_dimensions['C'].width = 60
-                wbh.save(hyol)
+                guvenli_kaydet(wbh, hyol)
                 log_cb(f"📄 Detay: OLUSTURULAMAYANLAR_{donem.replace('.','_')}.xlsx", "err")
             except Exception:
                 pass
@@ -2040,7 +2063,7 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                 ws_v.column_dimensions['B'].width = 26
                 ws_v.column_dimensions['C'].width = 45
                 ws_v.column_dimensions['D'].width = 22
-                wb_v.save(vkn_yolu)
+                guvenli_kaydet(wb_v, vkn_yolu)
                 log_cb(f"📇 VKN listesi: VKN_LISTESI_{donem.replace('.','_')}.xlsx "
                        f"({len(vkn_sirali)} firma, dosya sırasıyla)", "ok")
             except Exception as e:
@@ -2076,7 +2099,7 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                 df, secilen, df_gecersiz, esik_tek, esik_toplam,
                 yuzde80, donem, basarili, len(hatali), bos_sayisi=len(bos_uretilen))
             ozet_yolu = str(cikis_kl / f"OZET_RAPOR_{donem.replace('.','_')}.xlsx")
-            ozet_wb.save(ozet_yolu)
+            guvenli_kaydet(ozet_wb, ozet_yolu)
             log_cb(f"📊 Özet rapor: OZET_RAPOR_{donem.replace('.','_')}.xlsx "
                    f"(gerçek kapsam %{kapsam_pct:.1f})", "ok")
         except Exception as e:
