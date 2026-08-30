@@ -154,7 +154,7 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `_fatura_deger_haritasi` / `_fatura_son_sutun_dahil` | Fatura doldurmanın TEK yöntemi: **KONUMSAL**. Sütun sırası tüm gerçek şablonlarda sabit (`Tarih\|No\|Cins\|Miktar\|Matrah\|KDV\|son`); `_fatura_deger_haritasi` rol→değer üretir, satır konumsal yazılır. SON sütun `_fatura_son_sutun_dahil` ile tipe göre: tutanak 'Defter Kayıt' **boş**, YMM 'KDV dahil toplam' **matrah+kdv**. **Hem `.docx` hem `.doc`/COM yolu aynı mantığı** kullanır — başlığa göre rol tahmini KULLANILMAZ (kırılgandı; cins boş kalıyordu). |
 | `_gecersizlik_nedeni` | Geçersiz VKN için insan-okur neden metni. |
 | `firmalari_filtrele` | **KALP.** VKN normalize, geçerli/geçersiz ayrım, 2 aşamalı %80 seçimi. |
-| `guvenli_kaydet` | Windows uzun yol (~260) sorununda dosya adını kısaltarak yeniden kaydeder. |
+| `guvenli_kaydet` / `_dosya_kilitli_mesaji` | Windows uzun yol (~260) sorununda dosya adını kısaltarak yeniden kaydeder. Çıktı dosyası Excel/Word'de AÇIKSA (PermissionError) net Türkçe mesajla yükseltir — farklı adla sessizce kaydetmez. `.docx` karşılığı `_guvenli_docx_kaydet`; yan raporlar da bu yoldan kaydedilir. |
 | `firma_excel_olustur` | Tek firmanın tutanak Excel'ini şablona göre yazar. |
 | `dosyalari_isle` | Orkestrasyon: oku → **ön bilgi + doğruluk uyarıları** → filtrele → her firma için üret → yan dosyalar + kalıcı günlük. Opsiyonel `ilerleme_cb`, `cikis_kok`, `pdf_uret`, `sablon_klasor`, **`cikti_turu`** ('excel'/'word'/'ikisi'). Ardışık numara yalnızca üretilen firmalar için. |
 | `KDVBolmeApp` | Tkinter GUI (sürükle-bırak **çoklu/toplu**, eşik + **doğrulama**, **çıktı türü seçici**, çıktı klasörü, PDF onayı, Word şablon klasörü, ilerleme çubuğu, log, logo, ayarları hatırlama). |
@@ -190,7 +190,7 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 yöntemini otomatikleştirir). Çalıştırma:
 
 ```bash
-pytest -q        # 81 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
+pytest -q        # 84 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
                  # VKN normalizasyon, üç liste tipi (yeni/eski GİB + muhasebe),
                  # CSV okuma, kriter doğrulama, doğruluk uyarıları (kdv/mükerrer/
                  # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca
@@ -235,7 +235,7 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - Geçersiz kimlikli satırlar tutanaklanamaz; kullanıcı kaynak listede
   düzeltirse kapsam iyileşir (program uyarıyor).
 - ~~GUI'de ilerleme çubuğu yok~~ → **eklendi** (firma sayısına göre dolar).
-- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 81 test).
+- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 84 test).
 - ~~İşlem öncesi önizleme/uyarı yok~~ → **eklendi** (ÖN BİLGİ bloğu + KDV
   tutarlılık, mükerrer fatura, dönem-dışı tarih uyarıları — hepsi yalnızca
   uyarır, seçimi/iş kuralını etkilemez).

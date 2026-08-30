@@ -1173,3 +1173,31 @@ def test_ymm_yazi_sayi_basligi_silinmez(tmp_path):
     paras = [p.text for p in doc0.paragraphs]
     assert any(p.strip().startswith("Sayı") for p in paras), "'Sayı :' başlığı silindi"
     assert any("Konu" in p for p in paras)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Çıktı dosyası AÇIK/kilitli iken net Türkçe hata (öneri #1)
+# ══════════════════════════════════════════════════════════════════════════
+class _KilitliWB:
+    """save çağrısı, dosya başka programda açıkmış gibi PermissionError atar."""
+    def save(self, yol):
+        raise PermissionError(13, "İşlem erişimi reddedildi")
+
+
+def test_guvenli_kaydet_acik_dosya_net_mesaj(tmp_path):
+    with pytest.raises(PermissionError) as ex:
+        exay.guvenli_kaydet(_KilitliWB(), str(tmp_path / "1) rapor.xlsx"))
+    m = str(ex.value)
+    assert "AÇIK" in m and "rapor.xlsx" in m                 # net, dosya adını içerir
+
+
+def test_guvenli_docx_kaydet_acik_dosya_net_mesaj(tmp_path):
+    with pytest.raises(PermissionError) as ex:
+        exay._guvenli_docx_kaydet(_KilitliWB(), str(tmp_path / "1) tutanak.docx"))
+    assert "AÇIK" in str(ex.value) and "tutanak.docx" in str(ex.value)
+
+
+def test_guvenli_kaydet_normal_calisir(tmp_path):
+    wb = openpyxl.Workbook(); wb.active["A1"] = "x"
+    yol = exay.guvenli_kaydet(wb, str(tmp_path / "ok.xlsx"))
+    assert yol.endswith("ok.xlsx")                            # kilitsizde normal kaydeder
