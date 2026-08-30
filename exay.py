@@ -2568,8 +2568,12 @@ class KDVBolmeApp:
             if yol.exists():
                 try:
                     from PIL import Image, ImageTk
+                    # LANCZOS: yeni Pillow'da Image.Resampling.LANCZOS, eskisinde
+                    # Image.LANCZOS. İkisini de destekle (yeni sürümde de logo yüklensin).
+                    _lanczos = getattr(getattr(Image, 'Resampling', Image), 'LANCZOS',
+                                       getattr(Image, 'LANCZOS', 1))
                     img = Image.open(str(yol)).convert('RGBA')
-                    img.thumbnail((100,100), Image.LANCZOS)
+                    img.thumbnail((100,100), _lanczos)
                     bg = Image.new('RGBA', img.size, (245,246,250,255))
                     bg.paste(img, mask=img.split()[3])
                     self._logo_img = ImageTk.PhotoImage(bg)
