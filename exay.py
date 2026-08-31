@@ -208,11 +208,13 @@ def tarih_fmt(val):
     except: return s
 
 def sayi_fmt(val):
-    if pd.isna(val) or str(val).strip() == '': return ''
-    try:
-        f = float(str(val).replace(',', '.'))
-        return str(int(f)) if f == int(f) else f'{f:.2f}'.replace('.', ',')
-    except: return str(val).strip()
+    """Sayıyı TR biçiminde metne çevirir (tam sayı ise ondalıksız).
+    Ayrıştırma `para_deger` ile yapılır; böylece binlik ayraçlı ('1.234.567,89')
+    değerler 0/bozuk olmaz (eski naif float() ayrıştırıcının hatasıydı)."""
+    f = para_deger(val)
+    if f is None:
+        return '' if (pd.isna(val) or str(val).strip() == '') else str(val).strip()
+    return str(int(f)) if f == int(f) else f'{f:.2f}'.replace('.', ',')
 
 def para_deger(val):
     """Kaynaktaki tutarı gerçek sayıya (float) çevirir; küsürat korunur.
@@ -406,6 +408,89 @@ def donem_disi_tarih_kontrol(df, donem):
         return (0, 0)
     disi = sum(1 for a in aylar if a != donem)
     return (len(aylar), disi)
+
+def _vkn_std(x):
+    """VKN/TCKN'yi FİLTRELEME ile aynı şekilde normalize eder (boşluk/'.0' temizler,
+    8-9 haneyi zfill(10)). Doğruluk kontrolleri, filtrelemeyle aynı firmayı görsün diye."""
+    s = str(x).strip().replace('.0', '').replace(' ', '')
+    if s.isdigit() and len(s) in (8, 9):
+        s = s.zfill(10)
+    return s
+
+def _vkn_gecerli_mi(s):
+    """Normalize edilmiş VKN/TCKN geçerli mi (10-11 hane, yer tutucu değil)."""
+    return s.isdigit() and len(s) in (10, 11) and s != s[0] * len(s)
+
+def bos_fatura_no_kontrol(df):
+    """Geçerli VKN'li olup fatura NUMARASI boş olan satır sayısı (tutanakta numara
+    boş kalır). Yalnızca uyarı; seçimi etkilemez."""
+    K = list(df.columns)
+    vkn_col = sutun_bul(K, ['vergi kimlik', 'vkn', 'tc kimlik'])
+    fno_col = sutun_bul(K, ['alış faturasının sıra no', 'fatura no'])
+    if not vkn_col or not fno_col:
+        return 0
+    n = 0
+    for v, f in zip(df[vkn_col], df[fno_col]):
+        if not _vkn_gecerli_mi(_vkn_std(v)):
+            continue
+        fs = str(f).strip()
+        if fs == '' or fs.lower() in ('nan', 'none', 'nat'):
+            n += 1
+    return n
+
+def vkn_unvan_tutarsizligi(df):
+    """Aynı (geçerli) VKN'nin birden çok FARKLI ünvanla girildiği durumlar.
+    [(vkn, [unvan...]), ...] döndürür. Tutanak ilk ünvanı kullanır; bu bir veri
+    tutarsızlığı uyarısıdır (yanlış/eksik ünvan girişi olabilir)."""
+    K = list(df.columns)
+    vkn_col   = sutun_bul(K, ['vergi kimlik', 'vkn', 'tc kimlik'])
+    unvan_col = sutun_bul(K, ['satıcının adı', 'ünvanı', 'unvan'])
+    if not vkn_col or not unvan_col:
+        return []
+    harita = {}
+    for v, u in zip(df[vkn_col], df[unvan_col]):
+        s = _vkn_std(v)
+        if not _vkn_gecerli_mi(s):
+            continue
+        us = str(u).strip()
+        if us == '' or us.lower() in ('nan', 'none', 'nat'):
+            continue
+        harita.setdefault(s, set()).add(us)
+    return [(v, sorted(u)) for v, u in harita.items() if len(u) > 1]
+
+def negatif_tutar_kontrol(df):
+    """Negatif tutarlı (iade/düzeltme faturası olabilir) satırların (adet, toplam)
+    bilgisi. Bilgilendirme amaçlıdır — net toplamlar iş kuralında zaten kullanılır."""
+    K = list(df.columns)
+    tutar_col = sutun_bul(K, ['kdv hariç tutarı', 'faturanın tutarı'])
+    if not tutar_col:
+        return (0, 0.0)
+    adet = 0
+    toplam = 0.0
+    for v in df[tutar_col]:
+        f = para_deger(v)
+        if f is not None and f < 0:
+            adet += 1
+            toplam += f
+    return (adet, toplam)
+
+def ayristirilamayan_tarih_kontrol(df):
+    """Dolu ama ayrıştırılamayan (tutanakta tarih ham/boş kalabilecek) satır sayısı.
+    Yalnızca uyarı."""
+    K = list(df.columns)
+    tarih_col = sutun_bul(K, ['alış faturasının tarihi', 'fatura tarihi', 'tarih'])
+    if not tarih_col:
+        return 0
+    n = 0
+    for v in df[tarih_col]:
+        if pd.isna(v):
+            continue
+        s = str(v).strip()
+        if s == '' or s.lower() in ('nan', 'none', 'nat'):
+            continue
+        if _ay_yil(v) is None:      # tanınan hiçbir tarih biçimine uymuyor
+            n += 1
+    return n
 
 # ══════════════════════════════════════════
 #  FİLTRELEME
@@ -1787,6 +1872,27 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
         if t_toplam and t_disi / t_toplam > 0.3:
             log_cb(f"  ⚠️  {t_disi}/{t_toplam} faturanın tarihi seçilen dönem "
                    f"({donem}) dışında — yanlış dönem dosyası olabilir.", "warn")
+        # ── Veri kalitesi kontrolleri (yalnızca uyarı; seçimi/iş kuralını etkilemez) ──
+        bos_no = bos_fatura_no_kontrol(df)
+        if bos_no:
+            log_cb(f"  ⚠️  {bos_no} satırda fatura NUMARASI boş — bu faturalar "
+                   f"tutanakta numarasız görünür.", "warn")
+        tutarsiz = vkn_unvan_tutarsizligi(df)
+        if tutarsiz:
+            log_cb(f"  ⚠️  {len(tutarsiz)} VKN birden çok FARKLI ünvanla girilmiş "
+                   f"(tutanakta ilk ünvan kullanılır):", "warn")
+            for v, us in tutarsiz[:5]:
+                log_cb(f"     • {v}: {'  |  '.join(u[:28] for u in us[:3])}", "warn")
+            if len(tutarsiz) > 5:
+                log_cb(f"     … ve {len(tutarsiz)-5} VKN daha", "warn")
+        neg_adet, neg_top = negatif_tutar_kontrol(df)
+        if neg_adet:
+            log_cb(f"  ℹ️  {neg_adet} negatif tutarlı satır ({neg_top:,.2f} ₺) — "
+                   f"iade/düzeltme olabilir; net tutar seçim hesabına dahildir.", "warn")
+        kotu_tarih = ayristirilamayan_tarih_kontrol(df)
+        if kotu_tarih:
+            log_cb(f"  ⚠️  {kotu_tarih} satırın tarihi ayrıştırılamadı — tutanakta "
+                   f"tarih ham/boş kalabilir.", "warn")
         log_cb(f"{'─'*50}", "info")
 
         log_cb("🔍 Firmalar filtreleniyor...", "info")
