@@ -135,6 +135,7 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `bulunan_sutunlar` | İşlem öncesi önizleme: kritik alanların hangi başlıklara eşlendiğini döndürür. |
 | `kdv_tutarlilik_kontrol` | KDV/matrah oranı makul KDV oranlarından uzaksa yanlış sütun eşleşmesine karşı uyarır (yalnızca uyarı). |
 | `mukerrer_fatura_bul` | Aynı (VKN, fatura no) birden çok satırda mı diye bakar (yalnızca uyarı). |
+| `bos_fatura_no_kontrol` / `vkn_unvan_tutarsizligi` / `negatif_tutar_kontrol` / `ayristirilamayan_tarih_kontrol` | Veri kalitesi kontrolleri (hepsi **yalnızca uyarı**, `_vkn_std`/`_vkn_gecerli_mi` ile filtrelemeyle aynı VKN'yi görür): boş fatura no, aynı VKN'de farklı ünvan, negatif (iade/düzeltme) tutar, ayrıştırılamayan tarih. |
 | `_ay_yil` / `donem_disi_tarih_kontrol` | Tarihleri tek-anlamlı ayrıştırır; dönem dışı fatura oranını verir (yanlış dönem dosyası uyarısı). |
 | `_csv_okuyucu_hazirla` | CSV/TXT için kodlama+ayraç saptar; read_excel ile aynı arayüzde okuyucu döndürür. |
 | `firma_pdf_olustur` / `pdf_destekli` / `_pdf_font_bul` | Opsiyonel PDF kopya (reportlab varsa; Türkçe için Unicode TTF kaydeder). |
@@ -194,7 +195,7 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 yöntemini otomatikleştirir). Çalıştırma:
 
 ```bash
-pytest -q        # 84 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
+pytest -q        # 90 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
                  # VKN normalizasyon, üç liste tipi (yeni/eski GİB + muhasebe),
                  # CSV okuma, kriter doğrulama, doğruluk uyarıları (kdv/mükerrer/
                  # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca
@@ -239,7 +240,7 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - Geçersiz kimlikli satırlar tutanaklanamaz; kullanıcı kaynak listede
   düzeltirse kapsam iyileşir (program uyarıyor).
 - ~~GUI'de ilerleme çubuğu yok~~ → **eklendi** (firma sayısına göre dolar).
-- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 84 test).
+- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 90 test).
 - ~~İşlem öncesi önizleme/uyarı yok~~ → **eklendi** (ÖN BİLGİ bloğu + KDV
   tutarlılık, mükerrer fatura, dönem-dışı tarih uyarıları — hepsi yalnızca
   uyarır, seçimi/iş kuralını etkilemez).
@@ -251,7 +252,8 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - ~~PDF çıktı yok~~ → **eklendi** (opsiyonel, `reportlab` varsa).
 - İlerleme çubuğu adım granülaritesi firma başınadır; tek bir firmanın çok
   büyük olması hâlinde ara ilerleme gösterilmez (yeterince ince).
-- Doğruluk kontrolleri (KDV oranı, mükerrer, dönem) **uyarı** niteliğindedir;
+- Doğruluk/veri kalitesi kontrolleri (KDV oranı, mükerrer, dönem, boş fatura no,
+  VKN-ünvan tutarsızlığı, negatif tutar, ayrıştırılamayan tarih) **uyarı** niteliğindedir;
   satır silmez / seçimi değiştirmez — kullanıcı kaynakta düzeltir.
 - **Çıktı türü seçilebilir:** yalnız Excel / yalnız Word / ikisi. Word modları
   şablon klasörü ister. Şablonda tek satır olsa da firmanın tüm faturaları

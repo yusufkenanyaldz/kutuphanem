@@ -1201,3 +1201,53 @@ def test_guvenli_kaydet_normal_calisir(tmp_path):
     wb = openpyxl.Workbook(); wb.active["A1"] = "x"
     yol = exay.guvenli_kaydet(wb, str(tmp_path / "ok.xlsx"))
     assert yol.endswith("ok.xlsx")                            # kilitsizde normal kaydeder
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Veri kalitesi kontrolleri (yalnızca uyarı — seçimi/iş kuralını etkilemez)
+# ══════════════════════════════════════════════════════════════════════════
+def test_sayi_fmt_binlik_ayrac():
+    # Eski naif ayrıştırıcı burada 0/bozuk verirdi; para_deger ile doğru:
+    assert exay.sayi_fmt("1.234.567,89") == "1234567,89"   # binlik+ondalık → doğru
+    assert exay.sayi_fmt("45927,50") == "45927,50"         # TR ondalık
+    assert exay.sayi_fmt(2500) == "2500"                   # tam sayı
+
+
+def _kalite_df():
+    return pd.DataFrame({
+        "Satıcının Adı-Soyadı / Ünvanı": ["A LTD", "A A.Ş.", "B LTD", "C LTD"],
+        "Satıcının Vergi Kimlik Numarası": ["1000000001", "1000000001", "2000000002", "3"],
+        "Alış Faturasının Sıra No'su": ["F1", "", "F3", "F4"],
+        "Alış Faturasının Tarihi": ["2026-01-05", "2026-01-06", "boş-tarih", "2026-01-08"],
+        "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı": [100.0, -50.0, 200.0, 300.0],
+    })
+
+
+def test_bos_fatura_no_kontrol():
+    # Geçerli VKN'li (1000000001) ama No'su boş 1 satır; geçersiz VKN "3" sayılmaz
+    assert exay.bos_fatura_no_kontrol(_kalite_df()) == 1
+
+
+def test_vkn_unvan_tutarsizligi():
+    t = exay.vkn_unvan_tutarsizligi(_kalite_df())
+    assert len(t) == 1 and t[0][0] == "1000000001"
+    assert set(t[0][1]) == {"A LTD", "A A.Ş."}       # aynı VKN, iki farklı ünvan
+
+
+def test_negatif_tutar_kontrol():
+    adet, toplam = exay.negatif_tutar_kontrol(_kalite_df())
+    assert adet == 1 and abs(toplam - (-50.0)) < 1e-9
+
+
+def test_ayristirilamayan_tarih_kontrol():
+    # "boş-tarih" ayrıştırılamaz → 1
+    assert exay.ayristirilamayan_tarih_kontrol(_kalite_df()) == 1
+
+
+def test_kalite_kontrolleri_secimi_etkilemez():
+    """Kontroller yalnızca uyarır: geçersiz VKN'li satır yine paydada, seçim değişmez."""
+    df = _kalite_df()
+    sec, gecersiz = exay.firmalari_filtrele(df, 150, 250, 80, _sessiz)
+    # "3" geçersiz → gecersiz'e düşer; kalite fonksiyonları df'i değiştirmemeli
+    assert len(gecersiz) == 1
+    assert exay.negatif_tutar_kontrol(df)[0] == 1    # df hâlâ negatif satırı içeriyor
