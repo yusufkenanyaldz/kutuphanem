@@ -140,7 +140,7 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `_csv_okuyucu_hazirla` | CSV/TXT için kodlama+ayraç saptar; read_excel ile aynı arayüzde okuyucu döndürür. |
 | `firma_pdf_olustur` / `pdf_destekli` / `_pdf_font_bul` | Opsiyonel PDF kopya (reportlab varsa; Türkçe için Unicode TTF kaydeder). |
 | `_doc_metni_oku` | Eski ikili `.doc`'un ana metnini çıkarır (olefile; WordDocument akışı UTF-16LE, 0x07→tab). Yalnızca okuma. |
-| `sablon_vkn_metinden` / `_blok_vkn` / `sablon_vkn_oku` | Karşı firmanın (vkn, unvan) bilgisini iki belge tipinden de çıkarır: **karşıt inceleme tutanağı** ("NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN") ve **YMM Bilgi İsteme yazısı** ("Hakkında Bilgi İstenilen Mükellef…"). VKN'yi 'V.D.' çevresinden ayıklar (karışık etiket/telefonla karışmaz). |
+| `sablon_vkn_metinden` / `_blok_vkn` / `sablon_vkn_oku` | Karşı firmanın (vkn, unvan) bilgisini iki belge tipinden de çıkarır: **karşıt inceleme tutanağı** ("NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN") ve **YMM Bilgi İsteme yazısı** ("Hakkında Bilgi İstenilen Mükellef…"). VKN'yi 3 stratejiyle ayıklar: (1) etiketin yanındaki numara ('V.D. – 6120050961'), (2) 'Vergi Dairesi …Nosu' etiket hücresinden sonraki DEĞER hücresi (etikette 'Hesap' gibi ek kelime olsa da), (3) hücre-bazlı son çare (telefon/faks hücreleri atlanır). `.doc`'ta tüm blok TEK satır olabildiğinden atlama hücre bazlıdır (satır bazlı değil). Karışık etiket/telefonla karışmaz. |
 | `_vkn_metinden_ayikla` | Metinden 10-11 haneli VKN/TCKN (boşlukları temizler, 8-9→zfill, yer tutucu geçersiz) — filtreyle aynı normalize. |
 | `sablonlari_indeksle` | Klasördeki `.doc`/`.docx` şablonları VKN→(yol, blok) indeksler. **Çok-firmalı tek `.docx`** (bir dosyada N tutanak) tanınır: her firma bloğu ayrı indekslenir. |
 | `_docx_firma_bloklari` / `_docx_blok_belgesi` / `_sablon_kayitlari` | Birleşik `.docx`'i firma bloklarına ayırır (blok başı = "KATMA DEĞER…TUTANAĞI" başlığı), tek bloğu izole eder, dosyadaki tüm (vkn, unvan, blok) kayıtlarını verir. |
@@ -195,7 +195,7 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 yöntemini otomatikleştirir). Çalıştırma:
 
 ```bash
-pytest -q        # 94 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
+pytest -q        # 96 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
                  # VKN normalizasyon, üç liste tipi (yeni/eski GİB + muhasebe),
                  # CSV okuma, kriter doğrulama, doğruluk uyarıları (kdv/mükerrer/
                  # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca
@@ -240,7 +240,7 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - Geçersiz kimlikli satırlar tutanaklanamaz; kullanıcı kaynak listede
   düzeltirse kapsam iyileşir (program uyarıyor).
 - ~~GUI'de ilerleme çubuğu yok~~ → **eklendi** (firma sayısına göre dolar).
-- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 94 test).
+- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 96 test).
 - ~~İşlem öncesi önizleme/uyarı yok~~ → **eklendi** (ÖN BİLGİ bloğu + KDV
   tutarlılık, mükerrer fatura, dönem-dışı tarih uyarıları — hepsi yalnızca
   uyarır, seçimi/iş kuralını etkilemez).
