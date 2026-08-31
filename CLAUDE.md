@@ -122,8 +122,8 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | Fonksiyon | Görev |
 |---|---|
 | `kaynak_yolu` | PyInstaller `.exe` içinde/dışında logo vb. yol çözümü (`_MEIPASS`). |
-| `sutun_bul` | Esnek (alt-dize, küçük harf) sütun adı bulucu. Her tipin bel kemiği. |
-| `kdv_sutunu_bul` | "KDV'si / KDV si / KDVsi"yi bulur; matrah/toplam/tevkifat KDV'siyle KARIŞMAZ. |
+| `sutun_bul` | Esnek (alt-dize, küçük harf) sütun adı bulucu. Her tipin bel kemiği. Arama terimleri artık TEK YERDE, modül düzeyi `ARA_*` sabitlerinde (`ARA_VKN/ARA_TARIH/ARA_FATNO/ARA_MATRAH/ARA_KDVYEDEK/ARA_UNVAN/ARA_CINS/ARA_MIKTAR`) — tüm çağrı yerleri bunları kullanır, yeni başlık varyasyonu tek satırla eklenir. Terimler DAR ve sondaki 'ı'sız ("Tutar"=" Tutarı"); spekülatif terim EKLENMEZ. |
+| `kdv_sutunu_bul` | "KDV'si / KDV si / KDVsi"yi bulur; matrah/toplam/tevkifat KDV'siyle KARIŞMAZ. 'tutarı' YASAK DEĞİL (matrah zaten 'hariç' ile dışlanır) → geçerli "KDV Tutarı" adlı sütun da bulunur. |
 | `seri_sutunu_bul` | Gerçek seri sütununu bulur; numara sütununu seri sanmaz. |
 | `ana_listeyi_oku` | Dosyayı okur, başlık satırını otomatik bulur, muhasebe eşlemesini uygular. |
 | `_muhasebe_tipini_esle` | 191 hesabı dökümünü standart GİB sütun adlarına çevirir. |
@@ -195,7 +195,7 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 yöntemini otomatikleştirir). Çalıştırma:
 
 ```bash
-pytest -q        # 90 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
+pytest -q        # 94 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
                  # VKN normalizasyon, üç liste tipi (yeni/eski GİB + muhasebe),
                  # CSV okuma, kriter doğrulama, doğruluk uyarıları (kdv/mükerrer/
                  # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca
@@ -240,7 +240,7 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - Geçersiz kimlikli satırlar tutanaklanamaz; kullanıcı kaynak listede
   düzeltirse kapsam iyileşir (program uyarıyor).
 - ~~GUI'de ilerleme çubuğu yok~~ → **eklendi** (firma sayısına göre dolar).
-- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 90 test).
+- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 94 test).
 - ~~İşlem öncesi önizleme/uyarı yok~~ → **eklendi** (ÖN BİLGİ bloğu + KDV
   tutarlılık, mükerrer fatura, dönem-dışı tarih uyarıları — hepsi yalnızca
   uyarır, seçimi/iş kuralını etkilemez).
