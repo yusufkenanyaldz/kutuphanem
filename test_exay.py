@@ -1293,3 +1293,28 @@ def test_varyant_basliklarla_uctan_uca(tmp_path):
     kols = list(df.columns)
     assert exay.sutun_bul(kols, exay.ARA_MATRAH) == "KDV Hariç Tutar"
     assert exay.kdv_sutunu_bul(kols) == "KDV Tutarı"
+
+
+def test_ymm_vergi_dairesi_hesap_nosu_ve_tek_satir_doc():
+    """YMM .doc: karşı firma bloğu tek satırda (tab'lı), etiket 'Vergi Dairesi/
+    Hesap Nosu', ve blokta 'Telefon/Fax' de var. VKN değer hücresinden gelmeli,
+    telefon VKN sanılmamalı (gerçek TIRSAN .doc bu düzendeydi)."""
+    metin = (
+        "Konu : Bilgi İsteme\n"
+        "Hakkında Bilgi İstenilen Mükellefin Altı\t\t"
+        "Ünvanı\tTIRSAN TREYLER SAN. VE TİC. A.Ş.\t\t"
+        "Vergi Dairesi/Hesap Nosu\tALİ FUAT CEBESOY / 844 005 7150\t\t"
+        "Adresi\tADLİYE MAH. 1520 NOLU SOK. NO:3 ARİFİYE / SAKARYA\t\t"
+        "Telefon/Fax\t0 264 295 30 00\n"
+        "İNCELEME DAYANAĞI\t31.01.2023 Tarih ve 11 Sayılı\n"
+    )
+    vkn, unvan = exay.sablon_vkn_metinden(metin)
+    assert vkn == "8440057150"                 # değer hücresindeki VKN (telefon değil)
+    assert "TIRSAN" in unvan
+
+
+def test_blok_vkn_tek_satir_telefon_atlanir():
+    # Her şey tek satırda; telefon hücresi VKN sanılmamalı, V.D. değeri seçilmeli
+    blok = ("Ünvanı\tX A.Ş.\tVergi Dairesi/Hesap Nosu\tKADIKÖY / 493 061 9102\t"
+            "Telefon/Fax\t0 216 000 00 00")
+    assert exay._blok_vkn(blok) == "4930619102"

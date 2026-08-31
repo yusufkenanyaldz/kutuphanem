@@ -978,21 +978,31 @@ def _vkn_metinden_ayikla(s):
     return en_iyi
 
 def _blok_vkn(blok):
-    """Karşı firma bloğundan VKN/TCKN ayıklar. Telefonla karışmaması için önce
-    'V.D.' / 'Vergi Dairesi' / 'Kurumlar V.D.' civarındaki numarayı arar (bazı
-    şablonlarda etiketler karışık olduğundan bu daha güvenilir); bulamazsa son
-    çare olarak bloktaki geçerli ilk kimliği alır."""
+    """Karşı firma bloğundan VKN/TCKN ayıklar. Şablonlar arasında etiket/hücre
+    düzeni değiştiğinden birkaç strateji sırayla denenir; telefonla karışmaz."""
+    # 1) Etiketin HEMEN yanındaki numara — aynı hücrede 'V.D. – 6120050961' gibi.
     for m in re.finditer(
             r'(?:[Vv]\.?\s*[Dd]\.?|[Vv]ergi\s*[Dd]airesi|[Kk]urumlar)'
             r'\s*[–\-/:.]*\s*([0-9][0-9 ]{7,14}[0-9])', blok):
         n = _vkn_metinden_ayikla(m.group(1))
         if n:
             return n
-    # Son çare: telefon/faks satırlarını dışla, kalan ilk geçerli kimliği al
-    for satir in blok.split('\n'):
-        if re.search(r'tel|faks|fax', satir, re.I):
+    # 2) 'Vergi Dairesi …(Hesap) Nosu' ETİKET hücresinden sonraki DEĞER hücresi
+    #    (etikette ek kelime olsa da; değer ayrı hücrede, tab ile ayrık).
+    m = re.search(r'[Vv]ergi\s*[Dd]airesi[^\t\n]*?\t+([^\t\n]+)', blok)
+    if m:
+        n = _vkn_metinden_ayikla(m.group(1))
+        if n:
+            return n
+    # 3) Son çare: hücre hücre (tab/satır) gez; telefon/faks etiketli ya da
+    #    telefon içeren hücreleri atla. (.doc'ta tüm blok tek satır olabildiğinden
+    #    satır bazlı atlama tüm bloğu düşürüyordu — hücre bazlı gezilir.)
+    hucreler = re.split(r'[\t\n]', blok)
+    for i, h in enumerate(hucreler):
+        onceki = hucreler[i - 1] if i > 0 else ''
+        if re.search(r'tel|faks|fax', onceki + ' ' + h, re.I):
             continue
-        n = _vkn_metinden_ayikla(satir)
+        n = _vkn_metinden_ayikla(h)
         if n:
             return n
     return None
@@ -1017,8 +1027,9 @@ def sablon_vkn_metinden(metin):
     if not unv:
         unv = re.search(r'[ÜUü]nvan[ıi]\s*\t+([^\t\n]+)', blok)
     unvan = unv.group(1).strip() if unv else None
-    # Önce doğru etiketli hücre; olmazsa 'V.D.' çevresinden ayıkla (karışık etiket)
-    vd = re.search(r'Vergi\s*Dairesi\s*/?\s*Nosu\s*\t+([^\t\n]+)', blok)
+    # Önce 'Vergi Dairesi …Nosu' etiketli hücrenin DEĞERİ (etikette 'Hesap' gibi
+    # ek kelime olsa da eşleşir); olmazsa 'V.D.' çevresinden ayıkla (karışık etiket).
+    vd = re.search(r'Vergi\s*Dairesi[^\t\n]*?\t+([^\t\n]+)', blok, re.I)
     vkn = _vkn_metinden_ayikla(vd.group(1)) if vd else None
     if not vkn:
         vkn = _blok_vkn(blok)
