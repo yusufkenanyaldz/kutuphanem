@@ -57,13 +57,31 @@ def sutun_bul(kolonlar, aranacak):
             if a.lower() in cs: return col
     return None
 
+# ── Sütun arama terimleri (TEK YER; üç liste tipini de karşılar) ──
+# sutun_bul alt-dize eşleştirir; bu yüzden terimler EN KISA tek-anlamlı biçimde
+# tutulur → "Tutar" da "Tutarı" da eşleşir (sondaki 'ı' yüzünden kaçırma olmaz).
+# Yeni bir başlık varyasyonu çıkarsa ilgili listeye tek satır eklemek yeterlidir.
+# Terimler DAR tutulur; yalnız kanıtlı gerçek varyasyonlar eklenir (spekülatif
+# terim, sutun_bul ilk-eşleşen-sütunu döndürdüğü için yanlış sütun kapabilir).
+# Tek gerçek düzeltme: sondaki 'ı' atılır ki "Tutar" da "Tutarı" da eşleşsin.
+ARA_VKN      = ['vergi kimlik', 'vkn', 'tckn', 'tc kimlik', 'vergi no', 'vergi numar']
+ARA_TARIH    = ['alış faturasının tarih', 'fatura tarih', 'tarih']   # eski filtre genişliği
+ARA_FATNO    = ['alış faturasının sıra no', 'fatura no', 'fatura numar']
+ARA_MATRAH   = ['kdv hariç tutar', 'faturanın tutar']               # 'matrah' EKLENMEZ (§2 kritik)
+ARA_KDVYEDEK = ['toplam indirilecek kdv', 'indirilecek kdv']        # kdv_sutunu_bul yedeği
+ARA_UNVAN    = ['satıcının adı', 'satıcı unvan', 'ünvan', 'unvan']
+ARA_CINS     = ['alınan mal ve/veya hizmetin cins', 'hizmetin cins', 'malın cins', 'cinsi']
+ARA_MIKTAR   = ['hizmetin miktar', 'malın miktar', 'miktar']
+
 def kdv_sutunu_bul(kolonlar):
     """Faturanın KDV'si sütununu bulur. 'KDV'si', 'KDV si', 'KDVsi', 'KDV' gibi
     biçimlerin hepsini yakalar; 'KDV Hariç Tutarı' (matrah), 'Toplam İndirilecek KDV',
     tevkifat / 2 nolu beyanname KDV sütunlarıyla KARIŞMAZ.
     Böylece hem eski (KDV'si) hem yeni (KDV si) liste tipinde doğru sütun seçilir."""
+    # NOT: 'tutarı/tutari' YASAK DEĞİL — matrah zaten 'hariç' ile dışlanıyor;
+    # 'tutarı' yasağı, geçerli "KDV Tutarı" adlı KDV sütununu yanlışlıkla eliyordu.
     yasak = ('hariç', 'haric', 'toplam', 'tevkifat', '2 nolu', 'ödenen', 'odenen',
-             'indirilecek', 'indirilen', 'dönem', 'donem', 'matrah', 'tutarı', 'tutari')
+             'indirilecek', 'indirilen', 'dönem', 'donem', 'matrah')
     # 1) Dar eşleşme: sadeleştirince 'kdvsi' veya 'kdv' olan sütun (asıl KDV'si sütunu)
     for col in kolonlar:
         cs = str(col).lower().strip()
@@ -271,7 +289,7 @@ def donem_bul(stem, df=None):
     # Veri tarihlerinden: en sık görülen ay/yıl
     if df is not None:
         tarih_col = sutun_bul(list(df.columns),
-                              ['alış faturasının tarihi', 'fatura tarihi', 'tarih'])
+                              ARA_TARIH)
         if tarih_col is not None:
             try:
                 t = pd.to_datetime(df[tarih_col], errors='coerce', dayfirst=True).dropna()
@@ -322,12 +340,12 @@ def bulunan_sutunlar(df):
     (etiket → sütun adı / None) sözlüğü olarak döndürür."""
     K = list(df.columns)
     return {
-        'VKN/TC':    sutun_bul(K, ['vergi kimlik', 'vkn', 'tc kimlik']),
-        'Tarih':     sutun_bul(K, ['alış faturasının tarihi', 'fatura tarihi', 'tarih']),
-        'Fatura No': sutun_bul(K, ['alış faturasının sıra no', 'fatura no']),
-        'Matrah':    sutun_bul(K, ['kdv hariç tutarı', 'faturanın tutarı']),
-        'KDV':       kdv_sutunu_bul(K) or sutun_bul(K, ['toplam indirilecek kdv']),
-        'Ünvan':     sutun_bul(K, ['satıcının adı', 'ünvanı', 'unvan']),
+        'VKN/TC':    sutun_bul(K, ARA_VKN),
+        'Tarih':     sutun_bul(K, ARA_TARIH),
+        'Fatura No': sutun_bul(K, ARA_FATNO),
+        'Matrah':    sutun_bul(K, ARA_MATRAH),
+        'KDV':       kdv_sutunu_bul(K) or sutun_bul(K, ARA_KDVYEDEK),
+        'Ünvan':     sutun_bul(K, ARA_UNVAN),
     }
 
 def kdv_tutarlilik_kontrol(df):
@@ -336,8 +354,8 @@ def kdv_tutarlilik_kontrol(df):
     uyarı üretir. [(mesaj, tip), ...] döndürür; sorun yoksa boş liste.
     Yalnızca uyarır — seçimi/iş kuralını etkilemez."""
     K = list(df.columns)
-    matrah_col = sutun_bul(K, ['kdv hariç tutarı', 'faturanın tutarı'])
-    kdv_col = kdv_sutunu_bul(K) or sutun_bul(K, ['toplam indirilecek kdv'])
+    matrah_col = sutun_bul(K, ARA_MATRAH)
+    kdv_col = kdv_sutunu_bul(K) or sutun_bul(K, ARA_KDVYEDEK)
     if not matrah_col or not kdv_col or matrah_col == kdv_col:
         return []
     oranlar = []
@@ -360,8 +378,8 @@ def mukerrer_fatura_bul(df):
     kayıtları bulur. [(vkn, fatura_no, adet), ...] döndürür (adet > 1).
     Yalnızca uyarı amaçlıdır; satırları silmez."""
     K = list(df.columns)
-    vkn_col = sutun_bul(K, ['vergi kimlik', 'vkn', 'tc kimlik'])
-    fno_col = sutun_bul(K, ['alış faturasının sıra no', 'fatura no'])
+    vkn_col = sutun_bul(K, ARA_VKN)
+    fno_col = sutun_bul(K, ARA_FATNO)
     if not vkn_col or not fno_col:
         return []
     say = {}
@@ -400,7 +418,7 @@ def donem_disi_tarih_kontrol(df, donem):
     olduğunu (toplam_tarihli, donem_disi) olarak döndürür. Yanlış dönem dosyasını
     yakalamaya yarayan bir uyarı ölçütüdür. Tarih sütunu yoksa (0, 0)."""
     K = list(df.columns)
-    tarih_col = sutun_bul(K, ['alış faturasının tarihi', 'fatura tarihi', 'tarih'])
+    tarih_col = sutun_bul(K, ARA_TARIH)
     if not tarih_col:
         return (0, 0)
     aylar = [a for a in (_ay_yil(v) for v in df[tarih_col]) if a]
@@ -425,8 +443,8 @@ def bos_fatura_no_kontrol(df):
     """Geçerli VKN'li olup fatura NUMARASI boş olan satır sayısı (tutanakta numara
     boş kalır). Yalnızca uyarı; seçimi etkilemez."""
     K = list(df.columns)
-    vkn_col = sutun_bul(K, ['vergi kimlik', 'vkn', 'tc kimlik'])
-    fno_col = sutun_bul(K, ['alış faturasının sıra no', 'fatura no'])
+    vkn_col = sutun_bul(K, ARA_VKN)
+    fno_col = sutun_bul(K, ARA_FATNO)
     if not vkn_col or not fno_col:
         return 0
     n = 0
@@ -443,8 +461,8 @@ def vkn_unvan_tutarsizligi(df):
     [(vkn, [unvan...]), ...] döndürür. Tutanak ilk ünvanı kullanır; bu bir veri
     tutarsızlığı uyarısıdır (yanlış/eksik ünvan girişi olabilir)."""
     K = list(df.columns)
-    vkn_col   = sutun_bul(K, ['vergi kimlik', 'vkn', 'tc kimlik'])
-    unvan_col = sutun_bul(K, ['satıcının adı', 'ünvanı', 'unvan'])
+    vkn_col   = sutun_bul(K, ARA_VKN)
+    unvan_col = sutun_bul(K, ARA_UNVAN)
     if not vkn_col or not unvan_col:
         return []
     harita = {}
@@ -462,7 +480,7 @@ def negatif_tutar_kontrol(df):
     """Negatif tutarlı (iade/düzeltme faturası olabilir) satırların (adet, toplam)
     bilgisi. Bilgilendirme amaçlıdır — net toplamlar iş kuralında zaten kullanılır."""
     K = list(df.columns)
-    tutar_col = sutun_bul(K, ['kdv hariç tutarı', 'faturanın tutarı'])
+    tutar_col = sutun_bul(K, ARA_MATRAH)
     if not tutar_col:
         return (0, 0.0)
     adet = 0
@@ -478,7 +496,7 @@ def ayristirilamayan_tarih_kontrol(df):
     """Dolu ama ayrıştırılamayan (tutanakta tarih ham/boş kalabilecek) satır sayısı.
     Yalnızca uyarı."""
     K = list(df.columns)
-    tarih_col = sutun_bul(K, ['alış faturasının tarihi', 'fatura tarihi', 'tarih'])
+    tarih_col = sutun_bul(K, ARA_TARIH)
     if not tarih_col:
         return 0
     n = 0
@@ -496,9 +514,9 @@ def ayristirilamayan_tarih_kontrol(df):
 #  FİLTRELEME
 # ══════════════════════════════════════════
 def firmalari_filtrele(df, esik_tek, esik_toplam, yuzde80, log_cb):
-    vkn_col   = sutun_bul(list(df.columns), ['vergi kimlik', 'vkn', 'tc kimlik'])
-    tutar_col = sutun_bul(list(df.columns), ['kdv hariç tutarı', 'faturanın tutarı'])
-    unvan_col = sutun_bul(list(df.columns), ['satıcının adı', 'ünvanı', 'unvan'])
+    vkn_col   = sutun_bul(list(df.columns), ARA_VKN)
+    tutar_col = sutun_bul(list(df.columns), ARA_MATRAH)
+    unvan_col = sutun_bul(list(df.columns), ARA_UNVAN)
 
     if not vkn_col:
         raise ValueError("VKN sütunu bulunamadı.")
@@ -695,20 +713,20 @@ def firma_excel_olustur(firma_df, cikis_dosya, tum_kolonlar):
     for ci, b in enumerate(SABLON_SUTUNLAR, 1):
         c = ws.cell(1, ci, value=b); c.number_format = '@'
 
-    tarih_col   = sutun_bul(tum_kolonlar, ["alış faturasının tarihi"])
+    tarih_col   = sutun_bul(tum_kolonlar, ARA_TARIH)
     # Fatura no: olduğu gibi (BBK2026... → fatura no)
-    faturano_col= sutun_bul(tum_kolonlar, ["alış faturasının sıra no"])
+    faturano_col= sutun_bul(tum_kolonlar, ARA_FATNO)
     # Seri: yalnızca gerçek bir seri sütunu varsa; numara sütununu seri sanma
     seri_col    = seri_sutunu_bul(tum_kolonlar, tarih_col, faturano_col)
-    tutar_col   = sutun_bul(tum_kolonlar, ["kdv hariç tutarı", "faturanın tutarı"])
+    tutar_col   = sutun_bul(tum_kolonlar, ARA_MATRAH)
     kdv_col     = kdv_sutunu_bul(tum_kolonlar)
-    if not kdv_col: kdv_col = sutun_bul(tum_kolonlar, ["toplam indirilecek kdv"])
+    if not kdv_col: kdv_col = sutun_bul(tum_kolonlar, ARA_KDVYEDEK)
     defter_col  = sutun_bul(tum_kolonlar, ["defter kayıt tarihi"])
     yevmiye_col = sutun_bul(tum_kolonlar, ["yevmiye numarası"])
     odeme_col   = sutun_bul(tum_kolonlar, ["ödeme şekli"])
     # Açıklama: listedeki "Alınan Mal ve/veya Hizmetin Cinsi" sütununu kullan,
     # yoksa varsa bir "Açıklama" sütununa düş
-    aciklama_col= sutun_bul(tum_kolonlar, ["alınan mal ve/veya hizmetin cinsi", "hizmetin cinsi", "cinsi"])
+    aciklama_col= sutun_bul(tum_kolonlar, ARA_CINS)
     if not aciklama_col:
         aciklama_col = sutun_bul(tum_kolonlar, ["açıklama"])
 
@@ -812,12 +830,12 @@ def firma_pdf_olustur(firma_df, pdf_dosya, tum_kolonlar, vkn='', unvan='', donem
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
     font = _pdf_font_bul()
-    tarih_col    = sutun_bul(tum_kolonlar, ["alış faturasının tarihi"])
-    faturano_col = sutun_bul(tum_kolonlar, ["alış faturasının sıra no"])
+    tarih_col    = sutun_bul(tum_kolonlar, ARA_TARIH)
+    faturano_col = sutun_bul(tum_kolonlar, ARA_FATNO)
     seri_col     = seri_sutunu_bul(tum_kolonlar, tarih_col, faturano_col)
-    tutar_col    = sutun_bul(tum_kolonlar, ["kdv hariç tutarı", "faturanın tutarı"])
-    kdv_col      = kdv_sutunu_bul(tum_kolonlar) or sutun_bul(tum_kolonlar, ["toplam indirilecek kdv"])
-    aciklama_col = sutun_bul(tum_kolonlar, ["alınan mal ve/veya hizmetin cinsi", "hizmetin cinsi", "cinsi"]) \
+    tutar_col    = sutun_bul(tum_kolonlar, ARA_MATRAH)
+    kdv_col      = kdv_sutunu_bul(tum_kolonlar) or sutun_bul(tum_kolonlar, ARA_KDVYEDEK)
+    aciklama_col = sutun_bul(tum_kolonlar, ARA_CINS) \
                    or sutun_bul(tum_kolonlar, ["açıklama"])
 
     def _para_str(v):
@@ -1139,13 +1157,13 @@ def _fatura_kaynak_kolonlari(kolonlar):
     """Kaynak listedeki fatura sütunlarını BİR KEZ çözer (rol → sütun adı); firma
     döngüsünde her satır için tekrar tekrar aranmasın diye dışarıda çağrılır."""
     return {
-        'tarih':  sutun_bul(kolonlar, ["alış faturasının tarihi", "fatura tarihi", "tarih"]),
-        'no':     sutun_bul(kolonlar, ["alış faturasının sıra no", "fatura no"]),
-        'cins':   sutun_bul(kolonlar, ["hizmetin cinsi", "malın cinsi", "cinsi"])
+        'tarih':  sutun_bul(kolonlar, ARA_TARIH),
+        'no':     sutun_bul(kolonlar, ARA_FATNO),
+        'cins':   sutun_bul(kolonlar, ARA_CINS)
                   or sutun_bul(kolonlar, ["açıklama"]),
-        'miktar': sutun_bul(kolonlar, ["miktar"]),
-        'tutar':  sutun_bul(kolonlar, ["kdv hariç tutarı", "faturanın tutarı"]),
-        'kdv':    kdv_sutunu_bul(kolonlar) or sutun_bul(kolonlar, ["toplam indirilecek kdv"]),
+        'miktar': sutun_bul(kolonlar, ARA_MIKTAR),
+        'tutar':  sutun_bul(kolonlar, ARA_MATRAH),
+        'kdv':    kdv_sutunu_bul(kolonlar) or sutun_bul(kolonlar, ARA_KDVYEDEK),
     }
 
 def _fatura_satir_degerleri(row, cols, son_dahil=False):
@@ -1745,7 +1763,7 @@ def ozet_rapor_olustur(df, secilen, df_gecersiz, esik_tek, esik_toplam,
     tutar vb.) hesaplayıp döndürür. Sayılar tutanaklarla aynı kaynaktan
     (para_deger ile) üretilir; iş kurallarını yeniden hesaplamaz, sadece
     zaten seçilmiş sonucu raporlar. Bir openpyxl Workbook döndürür."""
-    tutar_col = sutun_bul(list(df.columns), ['kdv hariç tutarı', 'faturanın tutarı'])
+    tutar_col = sutun_bul(list(df.columns), ARA_MATRAH)
 
     def _topla(frame):
         if frame is None or tutar_col is None or len(frame) == 0:
@@ -1973,8 +1991,8 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
             log_cb("  🧩 Word tutanakları tek dosyada birleştirilecek (yalnızca .docx).", "info")
         log_cb(f"{'─'*50}", "info")
 
-        unvan_col = sutun_bul(list(df.columns), ['satıcının adı', 'ünvanı'])
-        fno_col   = sutun_bul(list(df.columns), ['alış faturasının sıra no'])
+        unvan_col = sutun_bul(list(df.columns), ARA_UNVAN)
+        fno_col   = sutun_bul(list(df.columns), ARA_FATNO)
         basarili  = 0; hatali = []
         vkn_sirali = []   # tutanağı oluşturulan firmaların VKN'leri (dosya sırasıyla)
         sira_no = 0       # yalnızca başarılı dosyalar için ARDIŞIK numara (atlama olmaz)
@@ -2180,8 +2198,8 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
             try:
                 rapor_yolu = str(cikis_kl / f"GECERSIZ_SATIRLAR_{donem.replace('.','_')}.xlsx")
                 # Geçersiz satırların hangi VKN/TC içerdiğini de göster
-                vkn_col_r = sutun_bul(list(df.columns), ['vergi kimlik','vkn','tc kimlik'])
-                unvan_col_r = sutun_bul(list(df.columns), ['satıcının adı','ünvanı'])
+                vkn_col_r = sutun_bul(list(df.columns), ARA_VKN)
+                unvan_col_r = sutun_bul(list(df.columns), ARA_UNVAN)
                 rapor_df = df_gecersiz.copy()
                 rapor_df.insert(0, 'Sorun', rapor_df[vkn_col_r].apply(
                     lambda x: _gecersizlik_nedeni(x)) if vkn_col_r else 'Bilinmiyor')

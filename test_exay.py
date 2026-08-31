@@ -1251,3 +1251,45 @@ def test_kalite_kontrolleri_secimi_etkilemez():
     # "3" geçersiz → gecersiz'e düşer; kalite fonksiyonları df'i değiştirmemeli
     assert len(gecersiz) == 1
     assert exay.negatif_tutar_kontrol(df)[0] == 1    # df hâlâ negatif satırı içeriyor
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Sütun bulma sağlamlığı: başlık varyasyonları + sondaki 'ı' tuzağı
+# ══════════════════════════════════════════════════════════════════════════
+def test_sutun_bul_tutar_sondaki_i_tuzagi():
+    # "KDV Hariç Tutar" (sonda ı YOK) da bulunmalı — eski 'tutarı' terimi kaçırırdı
+    assert exay.sutun_bul(["KDV Hariç Tutar"], exay.ARA_MATRAH) == "KDV Hariç Tutar"
+    assert exay.sutun_bul(["KDV Hariç Tutarı"], exay.ARA_MATRAH) == "KDV Hariç Tutarı"
+    # KDV (tutarı) sütununu matrah SANMAMALI
+    assert exay.sutun_bul(["KDV Tutarı"], exay.ARA_MATRAH) is None
+
+
+def test_sutun_bul_vkn_sinonimleri():
+    for baslik in ["Satıcının Vergi Kimlik Numarası", "TCKN", "Vergi No",
+                   "Vergi Numarası", "VKN/TCKN"]:
+        assert exay.sutun_bul([baslik], exay.ARA_VKN) == baslik, baslik
+
+
+def test_sutun_bul_fatura_no_ve_unvan_varyasyon():
+    assert exay.sutun_bul(["Fatura Numarası"], exay.ARA_FATNO) == "Fatura Numarası"
+    assert exay.sutun_bul(["Ünvan"], exay.ARA_UNVAN) == "Ünvan"
+    assert exay.sutun_bul(["Unvanı"], exay.ARA_UNVAN) == "Unvanı"
+
+
+def test_varyant_basliklarla_uctan_uca(tmp_path):
+    """Farklı ama geçerli başlıklarla (Vergi No / KDV Hariç Tutar / Fatura Numarası)
+    filtreleme sorunsuz çalışmalı."""
+    df = pd.DataFrame({
+        "Satıcı Unvanı": ["A LTD", "B LTD"],
+        "Vergi No": ["1000000001", "2000000002"],
+        "Fatura Numarası": ["F1", "F2"],
+        "Fatura Tarihi": ["2026-01-05", "2026-01-06"],
+        "KDV Hariç Tutar": [500000.0, 100000.0],
+        "KDV Tutarı": [100000.0, 20000.0],
+    })
+    sec, gecersiz = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
+    assert "1000000001" in sec and len(gecersiz) == 0     # A tek faturası ≥150K
+    # Excel çıktısında matrah/kdv doğru sütunlardan gelmeli (KDV≠matrah)
+    kols = list(df.columns)
+    assert exay.sutun_bul(kols, exay.ARA_MATRAH) == "KDV Hariç Tutar"
+    assert exay.kdv_sutunu_bul(kols) == "KDV Tutarı"
