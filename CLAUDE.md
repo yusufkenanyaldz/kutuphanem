@@ -42,6 +42,12 @@ Bir firma (VKN) şu **seçim kurallarıyla** tutanaklanır:
    belirlenemez), **ama tutarları %80 hesabının paydasında kalır.** Bunları
    paydadan düşmek kuralın ihlalidir — gerçek kapsam %80'in altına düşer.
    Bu, geçmişte yaşanmış ve düzeltilmiş gerçek bir hatadır; koruyun.
+   **Tek istisna — TOPLAM satırı fatura değildir:** listeye eklenmiş VKN'siz
+   "GENEL TOPLAM / ARA TOPLAM / NAKLİ YEKÜN" satırı paydaya eklenirse liste
+   toplamı ikiye katlanır. `toplam_satirlarini_ayikla` böyle bir satırı ANCAK
+   (VKN geçersiz) + (metinde toplam/yekün/total) + (tutarı kendinden önceki
+   faturaların toplamına 1 ₺ içinde EŞİT) ise ayıklar ve günlüğe yazar. Bu üç
+   koşulu gevşetmeyin — gevşerse gerçek geçersiz faturalar paydadan düşer.
 
 4. Seçilen firmalar dosya isimlerinde **büyükten küçüğe (toplam tutar)**
    sıralanır ve **1'den ardışık** numaralandırılır (atlama olmamalı).
@@ -67,6 +73,16 @@ Dosya biçimi olarak **`.xlsx`, `.xls`, `.csv` ve `.txt`** desteklenir. CSV/TXT
 için kodlama (UTF-8 / cp1254) ve ayraç (`;`, sekme, `,`) otomatik saptanır
 (`_csv_okuyucu_hazirla`); okuyucu, `read_excel` ile aynı arayüzde (header/skiprows)
 çalışır, böylece başlık bulma ve muhasebe eşleme mantığı değişmeden geçerlidir.
+
+Okuma sağlamlığı (hepsi test edildi): başlıklar **Türkçe büyük harfle** de gelebilir
+('TARİH', 'KDV HARİÇ TUTARI', 'AÇIKLAMA', 'BORÇ') — `str.lower()` 'İ'yi 'i̇' yaptığı
+için tüm başlık karşılaştırmaları `_ascii_kucuk` ile katlanır. Başlık satırı,
+anahtar geçen satırlar arasından **en çok rakamsız metin hücresi** olan satırdır
+(`_baslik_satiri_bul`; üstteki 'Vergi Kimlik No: …' unvan satırı ya da açıklaması
+anahtar içeren veri satırı başlık sanılmaz). Çok sayfalı Excel'de başlığı tanınan
+sayfa okunur, diğer dolu sayfalar günlükte uyarılır. CSV: kodlama tüm dosyadan
+(UTF-16/Excel 'Unicode Metin' dahil), ayraç satır tutarlılığından saptanır; başlık
+üstü unvan/boş satırlar ve satır sonu ayraçları sorun çıkarmaz.
 
 **Yeni bir liste tipi eklerken:** genelde sadece (a) `sutun_bul` arama
 terimlerini genişletmek veya (b) `_muhasebe_tipini_esle` benzeri bir eşleme
@@ -122,14 +138,18 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | Fonksiyon | Görev |
 |---|---|
 | `kaynak_yolu` | PyInstaller `.exe` içinde/dışında logo vb. yol çözümü (`_MEIPASS`). |
-| `sutun_bul` | Esnek (alt-dize, küçük harf) sütun adı bulucu. Her tipin bel kemiği. Arama terimleri artık TEK YERDE, modül düzeyi `ARA_*` sabitlerinde (`ARA_VKN/ARA_TARIH/ARA_FATNO/ARA_MATRAH/ARA_KDVYEDEK/ARA_UNVAN/ARA_CINS/ARA_MIKTAR`) — tüm çağrı yerleri bunları kullanır, yeni başlık varyasyonu tek satırla eklenir. Terimler DAR ve sondaki 'ı'sız ("Tutar"=" Tutarı"); spekülatif terim EKLENMEZ. |
+| `_ascii_kucuk` | Türkçe-güvenli küçük harf/ASCII fold (İ→i). Dosyanın başında (YARDIMCI) tanımlıdır; tüm başlık/anahtar kelime karşılaştırmaları bunu kullanır. |
+| `sutun_bul` | Esnek (alt-dize, küçük harf, **Türkçe büyük harf güvenli**) sütun adı bulucu. Her tipin bel kemiği. Arama terimleri artık TEK YERDE, modül düzeyi `ARA_*` sabitlerinde (`ARA_VKN/ARA_TARIH/ARA_FATNO/ARA_MATRAH/ARA_KDVYEDEK/ARA_UNVAN/ARA_CINS/ARA_MIKTAR`) — tüm çağrı yerleri bunları kullanır, yeni başlık varyasyonu tek satırla eklenir. Terimler DAR ve sondaki 'ı'sız ("Tutar"=" Tutarı"); spekülatif terim EKLENMEZ. |
 | `kdv_sutunu_bul` | "KDV'si / KDV si / KDVsi"yi bulur; matrah/toplam/tevkifat KDV'siyle KARIŞMAZ. 'tutarı' YASAK DEĞİL (matrah zaten 'hariç' ile dışlanır) → geçerli "KDV Tutarı" adlı sütun da bulunur. |
 | `seri_sutunu_bul` | Gerçek seri sütununu bulur; numara sütununu seri sanmaz. |
-| `ana_listeyi_oku` | Dosyayı okur, başlık satırını otomatik bulur, muhasebe eşlemesini uygular. |
+| `ana_listeyi_oku` | Dosyayı okur, sayfayı/başlık satırını otomatik bulur, muhasebe eşlemesini uygular, TOPLAM satırlarını ayıklar. Ek bilgiyi `df.attrs`'a koyar (`sayfa`, `diger_sayfalar`, `toplam_satirlari`) — `dosyalari_isle` günlüğe yazar. Boş listede net Türkçe `ValueError`. |
+| `_baslik_satiri_bul` | Başlık satırı seçimi (anahtar geçen satırlar arasında en çok rakamsız metin hücresi). |
+| `toplam_satirlarini_ayikla` | VKN'siz TOPLAM satırını (tutarı üstündekilerin toplamına eşitse) ayıklar — §2.3 istisnası. |
 | `_muhasebe_tipini_esle` | 191 hesabı dökümünü standart GİB sütun adlarına çevirir. |
-| `para_deger` | **Doğru** sayı ayrıştırıcı ("1.234.567,89" → 1234567.89). Toplamlarda bunu kullan. |
+| `para_deger` | **Doğru** sayı ayrıştırıcı ("1.234.567,89" → 1234567.89). Toplamlarda bunu kullan. Ondalıksız binlik ("1.234.567", "1,234,567"), bölünmez boşluk, muhasebe eksisi ("1.234,56-", "(1.234,56)") da tanınır. Tek noktalı "12.345" BELİRSİZDİR (yuvarlanmamış KDV olabilir) → ondalık kabul edilir; değiştirmeyin. |
+| `_tarih_coz` / `tarih_fmt` | Tek tarih ayrıştırıcı (ISO, GG.AA.YYYY, GG/AA/YYYY, GG-AA-YYYY, tek haneli gün/ay, saatli); tutanağa GİB biçimi GG.AA.YYYY yazılır. `_ay_yil` de bunu kullanır. |
 | `para_oku` | ESKİ ayrıştırıcı — binlik ayraçta 0 döner. Yeni kodda KULLANMA. |
-| `donem_bul` | Dönemi bulur: ay adı → sayısal ay+yıl → veri tarihleri → bugün. Ay adı eşleşmesi Türkçe karakter duyarsızdır (NISAN = NİSAN). |
+| `donem_bul` | Dönemi bulur: ay adı → sayısal ay+yıl → veri tarihleri → bugün. Ay adı eşleşmesi Türkçe karakter duyarsızdır (NISAN = NİSAN). Yıl yalnızca tek başına duran 20xx'tir (addaki VKN içinden alınmaz). Adda ay var yıl yoksa: yıl verideki o aydan; veri yoksa gelecekteki ay olamayacağından GEÇEN yıl (ARALIK listesi OCAK'ta işlenince). |
 | `ozet_rapor_olustur` | Çalışmanın tek sayfalık kapsam özetini üretir (openpyxl Workbook + gerçek kapsam % döndürür). |
 | `kriter_dogrula` | Eşik/yüzde girdilerini mantıklı aralıkta mı diye denetler (GUI hatalı girişi engeller). |
 | `bulunan_sutunlar` | İşlem öncesi önizleme: kritik alanların hangi başlıklara eşlendiğini döndürür. |
@@ -142,19 +162,20 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `_doc_metni_oku` | Eski ikili `.doc`'un ana metnini çıkarır (olefile; WordDocument akışı UTF-16LE, 0x07→tab). Yalnızca okuma. |
 | `sablon_vkn_metinden` / `_blok_vkn` / `sablon_vkn_oku` | Karşı firmanın (vkn, unvan) bilgisini iki belge tipinden de çıkarır: **karşıt inceleme tutanağı** ("NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN") ve **YMM Bilgi İsteme yazısı** ("Hakkında Bilgi İstenilen Mükellef…"). VKN'yi 3 stratejiyle ayıklar: (1) etiketin yanındaki numara ('V.D. – 6120050961'), (2) 'Vergi Dairesi …Nosu' etiket hücresinden sonraki DEĞER hücresi (etikette 'Hesap' gibi ek kelime olsa da), (3) hücre-bazlı son çare (telefon/faks hücreleri atlanır). `.doc`'ta tüm blok TEK satır olabildiğinden atlama hücre bazlıdır (satır bazlı değil). Karışık etiket/telefonla karışmaz. |
 | `_vkn_metinden_ayikla` | Metinden 10-11 haneli VKN/TCKN (boşlukları temizler, 8-9→zfill, yer tutucu geçersiz) — filtreyle aynı normalize. |
-| `sablonlari_indeksle` | Klasördeki `.doc`/`.docx` şablonları VKN→(yol, blok) indeksler. **Çok-firmalı tek `.docx`** (bir dosyada N tutanak) tanınır: her firma bloğu ayrı indekslenir. |
+| `sablonlari_indeksle` | Klasördeki `.doc`/`.docx` şablonları VKN→(yol, blok) indeksler. **Çok-firmalı tek `.docx`** (bir dosyada N tutanak) tanınır: her firma bloğu ayrı indekslenir. Uzantı harf duyarsız; **`Hazır Tutanaklar*` çıktı klasörleri atlanır** (önceki doldurulmuş tutanaklar şablon sanılmasın); VKN'si okunamayan dosyalar günlükte listelenir. |
 | `_docx_firma_bloklari` / `_docx_blok_belgesi` / `_sablon_kayitlari` | Birleşik `.docx`'i firma bloklarına ayırır (blok başı = "KATMA DEĞER…TUTANAĞI" başlığı), tek bloğu izole eder, dosyadaki tüm (vkn, unvan, blok) kayıtlarını verir. |
-| `_docx_govde_ekle` / `firmalar_tek_docx` | Doldurulmuş firma docx'lerini tek dosyada (her firma yeni sayfada) birleştirir. |
+| `_docx_govde_ekle` / `firmalar_tek_docx` | Doldurulmuş firma docx'lerini tek dosyada (her firma yeni sayfada) birleştirir. Kopyalanan gövdedeki resim/dış bağlantı rId'leri hedef belgeye taşınır (farklı şablonların logosu/imzası bozuk ya da yanlış çıkmasın). |
 | `firma_docx_olustur` / `docx_destekli` | `.docx` şablonu python-docx ile açıp fatura tablosunu doldurur, yeni `.docx` yazar (**Word gerektirmez**). |
 | `firma_word_olustur` / `word_destekli` | Eski `.doc` şablonu Word (COM) ile açıp fatura tablosunu günceller (Windows + Word). Konumsal doldurur (aşağıya bakın). |
 | `firma_word_uret` / `sablon_uretilebilir_mi` | Uzantıya göre doğru üreticiyi seçer (.docx→python-docx, .doc→COM); ön koşulu denetler. `inceleme_dayanagi` geçirir. |
 | `_docx_inceleme_dayanagi_yaz` | Tutanaktaki "İNCELEME DAYANAĞI" (sözleşme) değer hücresini günceller — eski şablonun eski yılını otomatik ezer. |
-| `_ascii_kucuk` | Türkçe-güvenli küçük harf/ASCII fold (İ→i). Anahtar-kelime eşleşmelerinde `.lower()` yerine bunu kullan. |
 | `_docx_metni_oku` | `.docx` metnini (paragraf + tablo hücreleri, sekmeli) çıkarır — VKN okuma için. |
 | `_word_fatura_satiri` / `_fatura_tablosu_mu` / `_tr_para_str` | Fatura satırını Word tablo sırasına çevirir (KONUMSAL yedek); fatura tablosunu başlığından tanır (tutanak *ve* YMM yazısı); TR para biçimi. |
 | `_fatura_deger_haritasi` / `_fatura_son_sutun_dahil` | Fatura doldurmanın TEK yöntemi: **KONUMSAL**. Sütun sırası tüm gerçek şablonlarda sabit (`Tarih\|No\|Cins\|Miktar\|Matrah\|KDV\|son`); `_fatura_deger_haritasi` rol→değer üretir, satır konumsal yazılır. SON sütun `_fatura_son_sutun_dahil` ile tipe göre: tutanak 'Defter Kayıt' **boş**, YMM 'KDV dahil toplam' **matrah+kdv**. **Hem `.docx` hem `.doc`/COM yolu aynı mantığı** kullanır — başlığa göre rol tahmini KULLANILMAZ (kırılgandı; cins boş kalıyordu). |
 | `_gecersizlik_nedeni` | Geçersiz VKN için insan-okur neden metni. |
 | `firmalari_filtrele` | **KALP.** VKN normalize, geçerli/geçersiz ayrım, 2 aşamalı %80 seçimi. |
+| `_metin_hucre` / `_df_excel_kaydet` | Excel'e METİN yazar: '=' ile başlayan metin (ör. açıklama "=KDV iadesi") formül olup dosyayı bozmasın. Tutanak ve tüm yan raporlar bunu kullanır; geçersiz satır raporu da artık `guvenli_kaydet`'ten geçer. |
+| `_bos_klasor_adi` | Var olmayan klasör adı (`_2`, `_3`…). Eski "Hazır Tutanaklar" klasörü (içinde yalnız Word/PDF olsa da) taşınır; taşınamazsa (içindeki dosya açık) yeni çıktılar damgalı ayrı klasöre yazılır. |
 | `guvenli_kaydet` / `_dosya_kilitli_mesaji` | Windows uzun yol (~260) sorununda dosya adını kısaltarak yeniden kaydeder. Çıktı dosyası Excel/Word'de AÇIKSA (PermissionError) net Türkçe mesajla yükseltir — farklı adla sessizce kaydetmez. `.docx` karşılığı `_guvenli_docx_kaydet`; yan raporlar da bu yoldan kaydedilir. |
 | `firma_excel_olustur` | Tek firmanın tutanak Excel'ini şablona göre yazar. |
 | `dosyalari_isle` | Orkestrasyon: oku → **ön bilgi + doğruluk uyarıları** → filtrele → her firma için üret → yan dosyalar + kalıcı günlük. Opsiyonel `ilerleme_cb`, `cikis_kok`, `pdf_uret`, `sablon_klasor`, **`cikti_turu`** ('excel'/'word'/'ikisi'). Ardışık numara yalnızca üretilen firmalar için. |
@@ -195,10 +216,11 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 yöntemini otomatikleştirir). Çalıştırma:
 
 ```bash
-pytest -q        # 96 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
+pytest -q        # 126 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
                  # VKN normalizasyon, üç liste tipi (yeni/eski GİB + muhasebe),
                  # CSV okuma, kriter doğrulama, doğruluk uyarıları (kdv/mükerrer/
-                 # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca
+                 # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca,
+                 # Türkçe büyük harf başlık, TOPLAM satırı, CSV/UTF-16 kenar durumları
 ```
 
 Gerçek GİB dosyaları depoda olmadığından testler üç liste tipini (yeni GİB,
@@ -240,7 +262,7 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - Geçersiz kimlikli satırlar tutanaklanamaz; kullanıcı kaynak listede
   düzeltirse kapsam iyileşir (program uyarıyor).
 - ~~GUI'de ilerleme çubuğu yok~~ → **eklendi** (firma sayısına göre dolar).
-- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 96 test).
+- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 126 test).
 - ~~İşlem öncesi önizleme/uyarı yok~~ → **eklendi** (ÖN BİLGİ bloğu + KDV
   tutarlılık, mükerrer fatura, dönem-dışı tarih uyarıları — hepsi yalnızca
   uyarır, seçimi/iş kuralını etkilemez).
@@ -250,6 +272,12 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - ~~Toplu (batch) işleme yok~~ → **eklendi** (çoklu dosya seç / sürükle-bırak).
 - ~~CSV girdi yok~~ → **eklendi** (`.csv`/`.txt`, kodlama+ayraç otomatik).
 - ~~PDF çıktı yok~~ → **eklendi** (opsiyonel, `reportlab` varsa).
+- **Açık iş kuralı sorusu (DEĞİŞTİRİLMEDİ, kullanıcıya danışılacak):** %80 hedefi
+  tutmadığında 2. aşama kalan TÜM firmaları ekler — toplamı 0 ya da negatif
+  (yalnız iade) olan firmalar da dahil; bunlar kapsama katkı yapmaz ama tutanak
+  üretilir.
+- Toplu işlemde aynı klasördeki her liste bir öncekinin "Hazır Tutanaklar"
+  klasörünü zaman damgalı ada taşır (veri kaybı yok; son liste düz adlı klasörde).
 - İlerleme çubuğu adım granülaritesi firma başınadır; tek bir firmanın çok
   büyük olması hâlinde ara ilerleme gösterilmez (yeterince ince).
 - Doğruluk/veri kalitesi kontrolleri (KDV oranı, mükerrer, dönem, boş fatura no,

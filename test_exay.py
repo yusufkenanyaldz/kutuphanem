@@ -44,8 +44,13 @@ def test_para_deger(girdi, beklenen):
 def test_tarih_fmt():
     assert exay.tarih_fmt("2026-04-15") == "15.04.2026"
     assert exay.tarih_fmt("") == ""
+    # Diğer yaygın biçimler de GİB biçimine (GG.AA.YYYY) çevrilir
+    assert exay.tarih_fmt("15/04/2026") == "15.04.2026"
+    assert exay.tarih_fmt("5.4.2026") == "05.04.2026"
+    assert exay.tarih_fmt("15-04-2026") == "15.04.2026"
+    assert exay.tarih_fmt("2026-04-15 00:00:00") == "15.04.2026"
     # Tanınmayan biçim olduğu gibi döner
-    assert exay.tarih_fmt("15/04/2026") == "15/04/2026"
+    assert exay.tarih_fmt("Nisan sonu") == "Nisan sonu"
 
 
 def test_sayi_fmt():
@@ -1318,3 +1323,304 @@ def test_blok_vkn_tek_satir_telefon_atlanir():
     blok = ("Ünvanı\tX A.Ş.\tVergi Dairesi/Hesap Nosu\tKADIKÖY / 493 061 9102\t"
             "Telefon/Fax\t0 216 000 00 00")
     assert exay._blok_vkn(blok) == "4930619102"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Büyüteç turu — gerçek dosyalarda karşılaşılabilecek kenar durumlar
+# ══════════════════════════════════════════════════════════════════════════
+_BUYUK_GIB = ["ALIŞ FATURASININ TARİHİ", "ALIŞ FATURASININ SERİSİ",
+              "ALIŞ FATURASININ SIRA NO'SU", "SATICININ ADI-SOYADI / ÜNVANI",
+              "SATICININ VERGİ KİMLİK NUMARASI", "ALINAN MAL VE/VEYA HİZMETİN CİNSİ",
+              "ALIŞ FATURASININ KDV HARİÇ TUTARI", "KDV'Sİ"]
+
+
+def test_sutun_bul_turkce_buyuk_harf():
+    """'TARİH'.lower() → 'tari̇h' (noktalı i) olduğu için BÜYÜK HARFLİ başlıklar
+    bulunamıyor, 'KDV HARİÇ TUTARI' yasağı atlatıp KDV sanılıyordu."""
+    K = _BUYUK_GIB
+    assert exay.sutun_bul(K, exay.ARA_TARIH) == "ALIŞ FATURASININ TARİHİ"
+    assert exay.sutun_bul(K, exay.ARA_VKN) == "SATICININ VERGİ KİMLİK NUMARASI"
+    assert exay.sutun_bul(K, exay.ARA_FATNO) == "ALIŞ FATURASININ SIRA NO'SU"
+    assert exay.sutun_bul(K, exay.ARA_MATRAH) == "ALIŞ FATURASININ KDV HARİÇ TUTARI"
+    assert exay.sutun_bul(K, exay.ARA_UNVAN) == "SATICININ ADI-SOYADI / ÜNVANI"
+    assert exay.sutun_bul(K, exay.ARA_CINS) == "ALINAN MAL VE/VEYA HİZMETİN CİNSİ"
+    assert exay.kdv_sutunu_bul(K) == "KDV'Sİ"                      # matrah DEĞİL
+    assert exay.kdv_sutunu_bul(["KDV HARİÇ TUTARI", "TOPLAM KDV"]) is None
+    assert exay.seri_sutunu_bul(K, K[0], K[2]) == "ALIŞ FATURASININ SERİSİ"
+
+
+def test_buyuk_harf_gib_uctan_uca(tmp_path):
+    """Büyük harfli başlıklı liste okunur, başlık bulunur, KDV sütununa KDV yazılır."""
+    yol = tmp_path / "NISAN_2026.xlsx"
+    pd.DataFrame([
+        ["2026-04-01", "A", "F1", "FIRMA A", "1000000001", "mal", 200000, 40000],
+        ["2026-04-02", "A", "F2", "FIRMA B", "1000000002", "mal", 10000, 2000],
+    ], columns=_BUYUK_GIB).to_excel(yol, index=False)
+    df = exay.ana_listeyi_oku(str(yol))
+    sec, _ = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
+    assert "1000000001" in sec
+    cikti = tmp_path / "a.xlsx"
+    exay.firma_excel_olustur(sec["1000000001"][0], str(cikti), list(df.columns))
+    ws = openpyxl.load_workbook(cikti).active
+    assert ws.cell(2, 4).value == pytest.approx(200000)             # matrah
+    assert ws.cell(2, 5).value == pytest.approx(40000)              # KDV (matrah değil)
+
+
+def test_muhasebe_buyuk_harf_basliklar():
+    df = pd.DataFrame({"HESAP KODU": ["191.01"], "TARİH": ["2026-01-10"],
+                       "FATURA NO": ["F1"], "VERGİ KİMLİK NO": ["1000000001"],
+                       "AÇIKLAMA": ["FIRMA A"], "BORÇ": [36000], "MATRAH": [200000]})
+    d2 = exay._muhasebe_tipini_esle(df)
+    assert "Alış Faturasının Tarihi" in d2.columns
+    assert "Satıcının Adı-Soyadı / Ünvanı" in d2.columns             # AÇIKLAMA → ünvan
+    assert "KDV'si" in d2.columns                                   # BORÇ → KDV
+
+
+@pytest.mark.parametrize("girdi,beklenen", [
+    ("1.234.567", 1234567.0),        # TR binlik, ondalıksız (eskiden None → 0)
+    ("1,234,567", 1234567.0),        # EN binlik, ondalıksız
+    ("1\xa0234,56", 1234.56),        # bölünmez boşluk binlik ayracı
+    ("1.234,56-", -1234.56),         # muhasebe: sondaki eksi
+    ("(1.234,56)", -1234.56),        # muhasebe: parantezli eksi
+    ("-1.234,56", -1234.56),
+    ("12.345", 12.35),               # tek nokta belirsiz → ondalık (dokunulmaz)
+    ("1.23.4", None),                # bozuk gruplama → tahmin edilmez
+    ("nan", None),                   # metin 'nan' toplamı NaN yapmasın
+    ("-", None),
+])
+def test_para_deger_kenar_durumlar(girdi, beklenen):
+    assert exay.para_deger(girdi) == beklenen
+
+
+class _SahteZaman(exay.datetime):
+    """donem_bul'un 'bugün'ünü sabitlemek için (Ocak 2027)."""
+    @classmethod
+    def now(cls, tz=None):
+        return cls(2027, 1, 20)
+
+
+def test_donem_bul_yil_sinirli_ve_gecen_yil(monkeypatch):
+    # Dosya adındaki VKN'nin içinden yıl (2001) kapılmamalı
+    assert exay.donem_bul("KDV 3920012345 NISAN 2026") == "04.2026"
+    monkeypatch.setattr(exay, "datetime", _SahteZaman)
+    # ARALIK listesi OCAK 2027'de işleniyor → 12.2026 (12.2027 değil)
+    assert exay.donem_bul("ARALIK") == "12.2026"
+    assert exay.donem_bul("OCAK") == "01.2027"
+    # Veri varsa yıl verideki o aydan alınır
+    df = pd.DataFrame({"Alış Faturasının Tarihi": ["15.12.2025", "20.12.2025"]})
+    assert exay.donem_bul("ARALIK_liste", df) == "12.2025"
+
+
+def _toplamli_liste_yaz(yol, toplam_tutar):
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["İNDİRİLECEK KDV LİSTESİ"])
+    ws.append([])
+    ws.append(["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su",
+               "Satıcının Adı-Soyadı / Ünvanı", "Satıcının Vergi Kimlik Numarası",
+               "Alış Faturasının KDV Hariç Tutarı", "KDV si"])
+    ws.append(["01.04.2026", "A1", "FİRMA A", "1234567890", 200000, 40000])
+    ws.append(["02.04.2026", "B1", "FİRMA B", "2234567890", 50000, 10000])
+    ws.append(["03.04.2026", "C1", "FİRMA C", "3234567890", 30000, 6000])
+    ws.append(["04.04.2026", "X1", "VKN'Sİ YOK", "", 20000, 4000])  # gerçek geçersiz fatura
+    ws.append([None, None, "GENEL TOPLAM", None, toplam_tutar, 60000])
+    wb.save(yol)
+
+
+def test_toplam_satiri_payda_cift_sayilmaz(tmp_path):
+    """VKN'siz 'GENEL TOPLAM' satırı fatura değildir: paydaya eklenirse liste
+    toplamı ikiye katlanıyor, %80 hiç tutmuyordu."""
+    yol = tmp_path / "t.xlsx"
+    _toplamli_liste_yaz(yol, 300000)                  # = üstteki 4 faturanın toplamı
+    df = exay.ana_listeyi_oku(str(yol))
+    assert len(df) == 4
+    assert df.attrs["toplam_satirlari"] == [("GENEL TOPLAM", 300000.0)]
+    sec, gecersiz = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
+    # Geçersiz VKN'li GERÇEK fatura (20.000) paydada KALIR (§2 kuralı korunur)
+    assert len(gecersiz) == 1
+    wb, kapsam = exay.ozet_rapor_olustur(df, sec, gecersiz, 150000, 450000, 80,
+                                         "04.2026", len(sec), 0)
+    assert kapsam == pytest.approx(250000 / 300000 * 100, abs=0.1)   # A+B, payda 300K
+
+
+def test_toplam_satiri_tutar_tutmazsa_kalir(tmp_path):
+    """Tutarı üstteki faturaların toplamına eşit değilse satır AYIKLANMAZ
+    (yanlışlıkla fatura silinmesin — geçersiz satır olarak paydada kalır)."""
+    yol = tmp_path / "t.xlsx"
+    _toplamli_liste_yaz(yol, 123456)
+    df = exay.ana_listeyi_oku(str(yol))
+    assert len(df) == 5 and df.attrs["toplam_satirlari"] == []
+
+
+def test_csv_unvan_satiri_bos_satir_ve_gec_kodlama(tmp_path):
+    """Başlık üstü unvan satırı + boş satırlar + 8 KB'tan sonra gelen cp1254
+    karakteri + satır sonu ayraçları + ';' dosyada ondalık virgüller."""
+    yol = tmp_path / "NISAN_2026.csv"
+    satirlar = ["İNDİRİLECEK KDV LİSTESİ", "", "",
+                "Alış Faturasının Tarihi;Alış Faturasının Sıra No'su;Satıcının Adı-Soyadı / Ünvanı;"
+                "Satıcının Vergi Kimlik Numarası;Alış Faturasının KDV Hariç Tutarı;KDV si"]
+    for i in range(300):   # ~9 KB ASCII veri
+        satirlar.append(f"01.04.2026;F{i};FIRMA {i};{1000000100 + i};1.000,00;200,00;")
+    satirlar.append("02.04.2026;SON;ÇAĞRI ŞİRKETİ;1000009999;500.000,00;100.000,00;")
+    yol.write_bytes(("\r\n".join(satirlar) + "\r\n").encode("cp1254"))
+    df = exay.ana_listeyi_oku(str(yol))
+    assert len(df) == 301
+    assert "Satıcının Vergi Kimlik Numarası" in df.columns        # sütunlar kaymadı
+    assert df.iloc[-1]["Satıcının Adı-Soyadı / Ünvanı"] == "ÇAĞRI ŞİRKETİ"
+    sec, _ = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
+    assert "1000009999" in sec                                     # 500.000,00 doğru okundu
+
+
+def test_excel_unicode_metin_utf16_tab(tmp_path):
+    """Excel 'Unicode Metin (*.txt)' kaydı UTF-16 + sekme ayraçlıdır."""
+    yol = tmp_path / "NISAN_2026.txt"
+    icerik = ("Alış Faturasının Tarihi\tSatıcının Adı-Soyadı / Ünvanı\t"
+              "Satıcının Vergi Kimlik Numarası\tAlış Faturasının KDV Hariç Tutarı\tKDV si\r\n"
+              "01.04.2026\tŞİŞECAM\t1000000001\t200000,00\t40000,00\r\n")
+    yol.write_bytes(icerik.encode("utf-16"))
+    df = exay.ana_listeyi_oku(str(yol))
+    assert df.iloc[0]["Satıcının Adı-Soyadı / Ünvanı"] == "ŞİŞECAM"
+    assert exay.para_deger(df.iloc[0]["KDV si"]) == 40000.0
+
+
+def test_baslik_ustu_vergi_kimlik_satiri_baslik_sanilmaz(tmp_path):
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["Mükellefin Vergi Kimlik No: 9999999990"])          # tek anahtar
+    ws.append(["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su",
+               "Satıcının Adı-Soyadı / Ünvanı", "Satıcının Vergi Kimlik Numarası",
+               "Alış Faturasının KDV Hariç Tutarı", "KDV si"])
+    ws.append(["01.04.2026", "A1", "FIRMA A", "1234567890", 200000, 40000])
+    yol = tmp_path / "t.xlsx"; wb.save(yol)
+    df = exay.ana_listeyi_oku(str(yol))
+    assert "Satıcının Vergi Kimlik Numarası" in df.columns and len(df) == 1
+
+
+def test_veri_satiri_aciklamasi_baslik_sanilmaz(tmp_path):
+    """Muhasebe başlığında tek anahtar var ('vergi kimlik'); açıklaması iki anahtar
+    içeren bir VERİ satırı başlığın önüne geçmemeli."""
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["Hesap Kodu", "Tarih", "Fatura No", "Vergi Kimlik No", "Açıklama", "Borç", "Matrah"])
+    ws.append(["191.01", "2026-01-10", "F1", "1000000001",
+               "ALIŞ FATURASI KDV HARİÇ BEDEL", 36000, 200000])
+    yol = tmp_path / "m.xlsx"; wb.save(yol)
+    df = exay.ana_listeyi_oku(str(yol))
+    assert len(df) == 1 and exay.kdv_sutunu_bul(list(df.columns)) == "KDV'si"
+
+
+def test_coklu_sayfa_liste_sayfasi_secilir(tmp_path):
+    yol = tmp_path / "t.xlsx"
+    with pd.ExcelWriter(yol) as w:
+        pd.DataFrame({"Bilgi": ["Kapak sayfası"]}).to_excel(w, sheet_name="Kapak", index=False)
+        pd.DataFrame({"Alış Faturasının Tarihi": ["01.04.2026"],
+                      "Satıcının Vergi Kimlik Numarası": ["1234567890"],
+                      "Alış Faturasının KDV Hariç Tutarı": [200000]}).to_excel(
+            w, sheet_name="Liste", index=False)
+    df = exay.ana_listeyi_oku(str(yol))
+    assert df.attrs["sayfa"] == "Liste" and len(df) == 1
+    assert df.attrs["diger_sayfalar"] == ["Kapak"]
+
+
+def test_bos_liste_ve_tutarsiz_liste_net_hata(tmp_path):
+    yol = tmp_path / "bos.csv"; yol.write_text("", encoding="utf-8")
+    with pytest.raises(ValueError, match="boş"):
+        exay.ana_listeyi_oku(str(yol))
+    yol2 = tmp_path / "baslik.xlsx"
+    pd.DataFrame(columns=["Alış Faturasının Tarihi", "Satıcının Vergi Kimlik Numarası"]
+                 ).to_excel(yol2, index=False)
+    with pytest.raises(ValueError):
+        exay.ana_listeyi_oku(str(yol2))
+    df = pd.DataFrame({"Satıcının Vergi Kimlik Numarası": ["1000000001"],
+                       "Açıklama": ["x"]})
+    with pytest.raises(ValueError, match="Tutar"):
+        exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
+
+
+def test_eski_cikti_yalniz_word_olsa_da_tasinir(tmp_path):
+    yol = tmp_path / "NISAN_2026.xlsx"
+    _yeni_gib_yaz(yol)
+    eski = tmp_path / "Hazır Tutanaklar"; eski.mkdir()
+    (eski / "1) ESKI FIRMA 04-2026.docx").write_bytes(b"eski")
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        cikti_turu='excel')
+    yedekler = [p for p in tmp_path.iterdir() if p.name.startswith("Hazır Tutanaklar_")]
+    assert len(yedekler) == 1 and (yedekler[0] / "1) ESKI FIRMA 04-2026.docx").exists()
+    assert not (eski / "1) ESKI FIRMA 04-2026.docx").exists()      # yeni klasör temiz
+
+
+def test_bos_klasor_adi_cakismaz(tmp_path):
+    (tmp_path / "K").mkdir(); (tmp_path / "K_2").mkdir()
+    assert exay._bos_klasor_adi(tmp_path / "K").name == "K_3"
+    assert exay._bos_klasor_adi(tmp_path / "Y").name == "Y"
+
+
+def test_sablon_taramasi_cikti_klasorunu_atlar_ve_vknsizi_bildirir(tmp_path):
+    _docx_sablon_yaz(tmp_path / "gercek.docx", "GERÇEK A.Ş.", "KADIKÖY / 1234567890")
+    cikti = tmp_path / "Hazır Tutanaklar_20260101_101010"; cikti.mkdir()
+    _docx_sablon_yaz(cikti / "1) DOLU.docx", "DOLU A.Ş.", "KADIKÖY / 5555555550")
+    import docx
+    docx.Document().save(tmp_path / "ustyazi.DOCX")                 # VKN'siz, büyük uzantı
+    loglar = []
+    idx = exay.sablonlari_indeksle(str(tmp_path), lambda m, t='': loglar.append(m))
+    assert set(idx) == {"1234567890"}                               # çıktı klasörü atlandı
+    metin = "\n".join(loglar)
+    assert "ustyazi.DOCX" in metin and "Hazır Tutanaklar" in metin
+
+
+def test_excel_esittir_ile_baslayan_metin_formul_olmaz(tmp_path):
+    kols = ["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su",
+            "Alınan Mal ve/veya Hizmetin Cinsi", "Alış Faturasının KDV Hariç Tutarı", "KDV si"]
+    df = pd.DataFrame([["2026-04-01", "F1", "=KDV iadesi", 1000, 200]], columns=kols)
+    yol = tmp_path / "f.xlsx"
+    exay.firma_excel_olustur(df, str(yol), kols)
+    h = openpyxl.load_workbook(yol).active.cell(2, 9)
+    assert h.value == "=KDV iadesi" and h.data_type == "s"
+
+
+def test_dosya_adi_temizle_satir_sonu():
+    assert exay.dosya_adi_temizle("ABC\nLTD  ŞTİ") == "ABC LTD ŞTİ"
+    assert exay.dosya_adi_temizle('A/B:C') == "A_B_C"
+
+
+def _resimli_docx(yol, renk):
+    import docx
+    from PIL import Image
+    png = yol.with_suffix(".png")
+    Image.new("RGB", (8, 8), renk).save(png)
+    d = docx.Document()
+    d.add_paragraph(f"Belge {renk}")
+    d.add_picture(str(png))
+    d.save(yol)
+    return docx.Document(yol)
+
+
+def test_tek_docx_birlestirme_resim_iliskileri(tmp_path):
+    """Farklı şablonlardan gelen resimli gövdeler birleşince rId'ler hedefte
+    doğru resmi göstermeli (eskiden kaynak rId'si kalıyor, belge bozuluyordu)."""
+    import docx
+    from docx.oxml.ns import qn
+    d1 = _resimli_docx(tmp_path / "a.docx", "red")
+    d2 = _resimli_docx(tmp_path / "b.docx", "blue")
+    yol = exay.firmalar_tek_docx([d1, d2], str(tmp_path / "birlesik.docx"))
+    m = docx.Document(yol)
+    blips = m.element.body.findall('.//' + qn('a:blip'))
+    rids = [b.get(qn('r:embed')) for b in blips]
+    assert len(rids) == 2 and len(set(rids)) == 2
+    bloblar = [m.part.related_parts[r].blob for r in rids]
+    assert bloblar[0] != bloblar[1]                                 # iki ayrı resim
+
+
+def test_mukerrer_fatura_vkn_normalize():
+    df = pd.DataFrame({"Satıcının Vergi Kimlik Numarası": ["71419747", "0071419747"],
+                       "Alış Faturasının Sıra No'su": ["F1", "F1"]})
+    assert exay.mukerrer_fatura_bul(df) == [("0071419747", "F1", 2)]
+
+
+def test_gui_firma_yok_hata_sayilmaz():
+    from unittest.mock import MagicMock
+    root = MagicMock(name="root")
+    root.after.side_effect = lambda _ms, f: f()                     # hemen çalıştır
+    app = exay.KDVBolmeApp(root)
+    app.birak_yazi = MagicMock(); app.durum_lbl = MagicMock()
+    app._tamam(None, 0, 0, {})
+    assert "firma yok" in app.birak_yazi.config.call_args.kwargs["text"]
+    app._tamam(None, 0, 1, {})
+    assert "Hata" in app.birak_yazi.config.call_args.kwargs["text"]

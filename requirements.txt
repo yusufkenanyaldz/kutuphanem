@@ -4,7 +4,7 @@
 # üst sınır = bir sonraki ANA sürüm (major) — böylece `pip install -r requirements.txt`
 # ileride sürpriz bir büyük güncellemeyle programı bozmaz, ama küçük/yama
 # güncellemelerini (hata düzeltmeleri) alabilir. Yeni bir sürüme geçmeden önce
-# `pytest -q` ile 84 testi çalıştırın.
+# `pytest -q` ile test paketini çalıştırın.
 
 pandas>=1.5,<4          # liste okuma/gruplama (read_excel, DataFrame, groupby)
 openpyxl>=3.0,<4        # .xlsx okuma/yazma (tutanak + yan raporlar)
