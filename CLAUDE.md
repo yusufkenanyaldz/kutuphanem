@@ -45,9 +45,14 @@ Bir firma (VKN) şu **seçim kurallarıyla** tutanaklanır:
    **Tek istisna — TOPLAM satırı fatura değildir:** listeye eklenmiş VKN'siz
    "GENEL TOPLAM / ARA TOPLAM / NAKLİ YEKÜN" satırı paydaya eklenirse liste
    toplamı ikiye katlanır. `toplam_satirlarini_ayikla` böyle bir satırı ANCAK
-   (VKN geçersiz) + (metinde toplam/yekün/total) + (tutarı kendinden önceki
-   faturaların toplamına 1 ₺ içinde EŞİT) ise ayıklar ve günlüğe yazar. Bu üç
-   koşulu gevşetmeyin — gevşerse gerçek geçersiz faturalar paydadan düşer.
+   (VKN geçersiz) + (metinde toplam/yekün/total **ya da** tarih, fatura no ve
+   ünvan hücrelerinin HEPSİ boş) + (tutarı kendinden önceki faturaların
+   toplamına 1 ₺ içinde EŞİT) ise ayıklar ve günlüğe yazar. Bu koşulları
+   gevşetmeyin — gevşerse gerçek geçersiz faturalar paydadan düşer.
+   **Gerçek vaka (Ağustos 2026):** GİB "İndirilecek KDV listesi yeni formatı"
+   dosyasının EN ALTINDA **etiketsiz** bir toplam satırı vardır (yalnız tutar
+   sütunları dolu). Eski sürüm bunu geçersiz fatura sayıp payda 163 M yerine
+   326 M oldu; %80 tutmadı ve 39 yerine 257 firmanın HEPSİNE tutanak üretti.
 
 4. Seçilen firmalar dosya isimlerinde **büyükten küçüğe (toplam tutar)**
    sıralanır ve **1'den ardışık** numaralandırılır (atlama olmamalı).
@@ -151,6 +156,7 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `para_oku` | ESKİ ayrıştırıcı — binlik ayraçta 0 döner. Yeni kodda KULLANMA. |
 | `donem_bul` | Dönemi bulur: ay adı → sayısal ay+yıl → veri tarihleri → bugün. Ay adı eşleşmesi Türkçe karakter duyarsızdır (NISAN = NİSAN). Yıl yalnızca tek başına duran 20xx'tir (addaki VKN içinden alınmaz). Adda ay var yıl yoksa: yıl verideki o aydan; veri yoksa gelecekteki ay olamayacağından GEÇEN yıl (ARALIK listesi OCAK'ta işlenince). |
 | `ozet_rapor_olustur` | Çalışmanın tek sayfalık kapsam özetini üretir (openpyxl Workbook + gerçek kapsam % döndürür). |
+| `kriter_tutari_oku` | GUI limit kutusunu okur: '150000', '150.000', '150,000', '150.000,00' → 150000 (eskiden '150,000' → 150 TL). |
 | `kriter_dogrula` | Eşik/yüzde girdilerini mantıklı aralıkta mı diye denetler (GUI hatalı girişi engeller). |
 | `bulunan_sutunlar` | İşlem öncesi önizleme: kritik alanların hangi başlıklara eşlendiğini döndürür. |
 | `kdv_tutarlilik_kontrol` | KDV/matrah oranı makul KDV oranlarından uzaksa yanlış sütun eşleşmesine karşı uyarır (yalnızca uyarı). |
@@ -216,7 +222,7 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 yöntemini otomatikleştirir). Çalıştırma:
 
 ```bash
-pytest -q        # 126 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
+pytest -q        # 136 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
                  # VKN normalizasyon, üç liste tipi (yeni/eski GİB + muhasebe),
                  # CSV okuma, kriter doğrulama, doğruluk uyarıları (kdv/mükerrer/
                  # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca,
@@ -236,7 +242,12 @@ sec, gecersiz = exay.firmalari_filtrele(df, 150000, 450000, 80, lambda *a, **k: 
 
 Her değişiklikten sonra **üç liste tipini de** (eski GİB, yeni GİB, muhasebe)
 test et. Bilinen gerçek dosyalarda beklenen gerçek kapsamlar:
-Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
+Nisan %94.2, Ocak %82.2, Muhasebe %82.4, **Ağustos 2026 (yeni GİB formatı,
+2 sayfalı .xls, etiketsiz toplam satırlı) → 656 fatura, 39 firma, %92.2**.
+Bu dosyada program çıktısı kullanıcının Excel tutanaklarıyla ve BARSA Word
+tutanağının fatura tablosuyla birebir aynı çıktı. Gerçek müşteri dosyaları
+(VKN/ünvan içerir) DEPOYA KONMAZ; testler bunların düzenini sentetik taklit eder
+(`_gib_yeni_bicim_yaz`).
 
 ---
 
@@ -262,7 +273,7 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - Geçersiz kimlikli satırlar tutanaklanamaz; kullanıcı kaynak listede
   düzeltirse kapsam iyileşir (program uyarıyor).
 - ~~GUI'de ilerleme çubuğu yok~~ → **eklendi** (firma sayısına göre dolar).
-- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 126 test).
+- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 136 test).
 - ~~İşlem öncesi önizleme/uyarı yok~~ → **eklendi** (ÖN BİLGİ bloğu + KDV
   tutarlılık, mükerrer fatura, dönem-dışı tarih uyarıları — hepsi yalnızca
   uyarır, seçimi/iş kuralını etkilemez).

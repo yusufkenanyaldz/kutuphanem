@@ -1624,3 +1624,73 @@ def test_gui_firma_yok_hata_sayilmaz():
     assert "firma yok" in app.birak_yazi.config.call_args.kwargs["text"]
     app._tamam(None, 0, 1, {})
     assert "Hata" in app.birak_yazi.config.call_args.kwargs["text"]
+
+
+def _gib_yeni_bicim_yaz(yol, toplam_satiri=True, toplam=None):
+    """GİB 'İndirilecek KDV listesi yeni formatı' düzeni (gerçek dosyadan): üstte 3 boş
+    satır, A sütunu boş, 'Sıra No' sütunu, 16 sütun ve EN ALTTA etiketsiz toplam satırı
+    (yalnızca tutar sütunlarında toplam; sıra no/tarih/ünvan/VKN boş)."""
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "İndirilecek KDV Listesi"
+    bas = ["Sıra No", "Alış Faturasının Tarihi", "Alış Faturasının Serisi",
+           "Alış Faturasının Sıra No'su", "Satıcının Adı-Soyadı / Ünvanı",
+           "Satıcının Vergi Kimlik Numarası / TC Kimlik Numarası",
+           "Alınan Mal ve/veya Hizmetin Cinsi", "Alınan Mal ve/veya Hizmetin Miktarı",
+           "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı", "KDV'si",
+           "Tevkifata Tabi Olmayan Ve Bu Dönemde İndirilen Kdv Tutarı",
+           "2 Nolu Beyannamede Ödenen Kdv Tutarı", "Toplam İndirilecek KDV Tutarı"]
+    for c, b in enumerate(bas, 2):
+        ws.cell(4, c, value=b)
+    satirlar = [
+        ("ATAKAŞ ÇELİK", "0950303776", 1350916.0),     # tek fatura ≥150K
+        ("AY PROFİL",    "1060068320", 650007.32),
+        ("KÜÇÜK A",      "1000000001", 40000.0),
+        ("KÜÇÜK B",      "1000000002", 30000.0),
+        ("KÜÇÜK C",      "1000000003", 20000.0),
+        ("RHEINZINK GMBH", "1111111111", 60000.0),      # yabancı → geçersiz VKN, paydada KALIR
+    ]
+    for i, (u, v, t) in enumerate(satirlar, 1):
+        ws.append([None, i, exay.datetime(2026, 8, i), None, f"F{i}", u, v, "MAL", "1 AD",
+                   t, round(t * 0.2, 2), round(t * 0.2, 2), 0, round(t * 0.2, 2)])
+    if toplam_satiri:
+        top = sum(t for *_, t in satirlar) if toplam is None else toplam
+        ws.append([None] * 9 + [top, round(top * 0.2, 2), None, None, round(top * 0.2, 2)])
+    wb.save(yol)
+    return sum(t for *_, t in satirlar)
+
+
+def test_etiketsiz_toplam_satiri_tum_firmalari_sectirmez(tmp_path):
+    """GERÇEK HATA (Ağustos 2026 listesi): GİB yeni biçimli listenin en altındaki
+    etiketsiz toplam satırı geçersiz VKN'li fatura sanılıyor, liste toplamı ikiye
+    katlanıyor, %80 tutmuyor ve 257 firmanın HEPSİNE tutanak çıkıyordu."""
+    yol = tmp_path / "İndirilecek KDV listesi yeni formatı 08.xlsx"
+    gercek_toplam = _gib_yeni_bicim_yaz(yol)
+    df = exay.ana_listeyi_oku(str(yol))
+    assert len(df) == 6
+    assert df.attrs["toplam_satirlari"] == [("TOPLAM (etiketsiz)", gercek_toplam)]
+    sec, gecersiz = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
+    # Payda = gerçek liste toplamı (RHEINZINK dahil, §2.3); 2 firma %80'i karşılar
+    assert set(sec) == {"0950303776", "1060068320"}
+    assert len(gecersiz) == 1                                  # yalnız RHEINZINK
+
+
+def test_etiketsiz_satir_tutar_tutmazsa_kalir(tmp_path):
+    """Kimliksiz satırın tutarı üstteki faturaların toplamına eşit değilse
+    ayıklanmaz (gerçek bir eksik kayıt olabilir — paydada kalır)."""
+    yol = tmp_path / "l.xlsx"
+    _gib_yeni_bicim_yaz(yol, toplam=999.0)
+    df = exay.ana_listeyi_oku(str(yol))
+    assert len(df) == 7 and df.attrs["toplam_satirlari"] == []
+
+
+@pytest.mark.parametrize("girdi,beklenen", [
+    ("150000", 150000.0), ("150.000", 150000.0), ("150,000", 150000.0),
+    ("150.000,00", 150000.0), ("150 000 ₺", 150000.0), ("1.500.000", 1500000.0),
+    ("1500,50", 1500.5),
+])
+def test_kriter_tutari_oku(girdi, beklenen):
+    assert exay.kriter_tutari_oku(girdi) == beklenen
+
+
+def test_kriter_tutari_oku_hatali():
+    with pytest.raises(ValueError):
+        exay.kriter_tutari_oku("yüz elli bin")

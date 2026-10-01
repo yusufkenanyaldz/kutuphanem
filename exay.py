@@ -340,14 +340,21 @@ def toplam_satirlarini_ayikla(df):
 
     Çok sıkı koşul (yanlışlıkla fatura silinmesin — §2 kuralı: geçersiz VKN'li
     FATURALAR paydada kalır): satır ancak (1) VKN'si geçersiz/boş, (2) bir metin
-    hücresinde 'toplam/yekün/total' geçiyor VE (3) tutarı, kendinden önceki
-    faturaların toplamına (ara toplam için: bir önceki toplam satırından bu yana
-    olanlara) 1 ₺ içinde EŞİT ise ayıklanır. Aksi hâlde satır olduğu gibi kalır."""
+    hücresinde 'toplam/yekün/total' geçiyor YA DA tarih, fatura no ve ünvan
+    hücrelerinin HEPSİ boş (GİB'in yeni biçimli listesindeki gibi ETİKETSİZ toplam
+    satırı — gerçek bir faturanın en az tarihi/numarası/satıcısı olur) VE (3) tutarı,
+    kendinden önceki faturaların toplamına (ara toplam için: bir önceki toplam
+    satırından bu yana olanlara) 1 ₺ içinde EŞİT ise ayıklanır. Aksi hâlde satır
+    olduğu gibi kalır."""
     K = list(df.columns)
     vkn_col = sutun_bul(K, ARA_VKN)
     tutar_col = sutun_bul(K, ARA_MATRAH)
     if not vkn_col or not tutar_col or df.empty:
         return df, []
+    kimlik_cols = [c for c in (sutun_bul(K, ARA_TARIH), sutun_bul(K, ARA_FATNO),
+                               sutun_bul(K, ARA_UNVAN)) if c is not None]
+    def _bos(v):
+        return v is None or (not isinstance(v, str) and pd.isna(v)) or not str(v).strip()
     blok = genel = 0.0
     atilacak, bilgi = [], []
     for idx, row in df.iterrows():
@@ -355,9 +362,13 @@ def toplam_satirlarini_ayikla(df):
         if f and not _vkn_gecerli_mi(_vkn_std(row[vkn_col])):
             metinler = [str(x) for x in row if isinstance(x, str) and x.strip()]
             m = _TOPLAM_RE.search(_ascii_kucuk(' '.join(metinler)))
-            if m and (abs(f - blok) <= 1.0 or abs(f - genel) <= 1.0):
-                etiket = next((t for t in metinler
-                               if _TOPLAM_RE.search(_ascii_kucuk(t))), m.group(0))
+            kimliksiz = bool(kimlik_cols) and all(_bos(row[c]) for c in kimlik_cols)
+            if (m or kimliksiz) and (abs(f - blok) <= 1.0 or abs(f - genel) <= 1.0):
+                if m:
+                    etiket = next((t for t in metinler
+                                   if _TOPLAM_RE.search(_ascii_kucuk(t))), m.group(0))
+                else:
+                    etiket = "TOPLAM (etiketsiz)"
                 atilacak.append(idx)
                 bilgi.append((etiket.strip()[:40], f))
                 blok = 0.0
@@ -534,6 +545,18 @@ def _gecersizlik_nedeni(x) -> str:
 #  KRİTER DOĞRULAMA & DOĞRULUK KONTROLLERİ
 #  (hepsi saf/yan etkisiz — yalnızca veri döndürür, iş kuralını değiştirmez)
 # ══════════════════════════════════════════
+def kriter_tutari_oku(metin):
+    """GUI'deki limit kutusunu (₺) sayıya çevirir. '150000', '150.000', '150,000',
+    '150.000,00', '150 000 ₺' hepsi 150000 olur. (Eskiden '150,000' → 150 TL
+    okunuyor, neredeyse her firma seçiliyordu.) Okunamazsa ValueError."""
+    s = re.sub(r'\s', '', str(metin)).replace('₺', '').replace('TL', '')
+    if re.fullmatch(r'\d{1,3}([.,])\d{3}(\1\d{3})*', s):   # yalnız binlik ayraçlı tamsayı
+        s = re.sub(r'[.,]', '', s)
+    f = para_deger(s)
+    if f is None:
+        raise ValueError(f"Limit okunamadı: {metin!r}")
+    return f
+
 def kriter_dogrula(esik_tek, esik_toplam, yuzde80):
     """Kullanıcının girdiği kriterleri mantıklı aralıkta mı diye denetler.
     (ok: bool, mesaj: str) döndürür; ok False ise mesaj kullanıcıya gösterilecek
@@ -3127,8 +3150,8 @@ class KDVBolmeApp:
         """Kriter alanlarını okuyup doğrular. Geçerliyse (True, (et,eto,y)),
         değilse kullanıcıya hata gösterip (False, None) döner."""
         try:
-            et  = float(self.esik_tek.get().replace('.','').replace(',','.'))
-            eto = float(self.esik_toplam.get().replace('.','').replace(',','.'))
+            et  = kriter_tutari_oku(self.esik_tek.get())
+            eto = kriter_tutari_oku(self.esik_toplam.get())
             y   = float(self.yuzde80.get().replace(',','.'))
         except Exception:
             messagebox.showerror("Hata", "Kriter değerleri geçersiz.\nSadece sayı girin.")
