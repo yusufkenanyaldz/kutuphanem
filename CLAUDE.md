@@ -4,6 +4,10 @@
 > oturum başında bu dosyayı otomatik okur. Amaç: kod tabanını, kurallarını ve
 > "neden böyle" kararlarını tek yerde toplamak.
 
+> **Kullanıcıyla çalışma geçmişi, kararlar, açık işler ve gerçek verilerle doğrulama
+> sonuçları: [`NOTLAR.md`](NOTLAR.md) — her oturumda CLAUDE.md'den sonra OKU.**
+> ⚠️ Depo herkese açık: müşteri VKN/ünvan/kişi bilgisi depoya YAZILMAZ.
+
 ---
 
 ## 1. Proje nedir?
@@ -57,7 +61,7 @@ Bir firma (VKN) şu **seçim kurallarıyla** tutanaklanır:
    İthalat İse)" hücresi DOLU satır ithalattır → %80 hesabına HİÇ girmez (ne
    seçilir ne paydada kalır), "geçersiz VKN" de sayılmaz (`ithalat_satirlarini_ayir`;
    `firmalari_filtrele` ve `ozet_rapor_olustur` içinde uygulanır). Ağustos 2026:
-   RHEINZINK (yer tutucu VKN 1111111111, 6,1 M) payda dışı → 157,2 M, 39 firma, %95,8.
+   tek ithalat satıcısı (yer tutucu VKN 1111111111, 6,1 M) payda dışı → 157,2 M, 39 firma, %95,8.
    GGB sütunu olmayan listelerde (eski GİB, muhasebe) hiçbir satır ithalat sayılmaz.
 
 4. Seçilen firmalar dosya isimlerinde **büyükten küçüğe (toplam tutar)**
@@ -179,7 +183,7 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `_csv_okuyucu_hazirla` | CSV/TXT için kodlama+ayraç saptar; read_excel ile aynı arayüzde okuyucu döndürür. |
 | `firma_pdf_olustur` / `pdf_destekli` / `_pdf_font_bul` | Opsiyonel PDF kopya (reportlab varsa; Türkçe için Unicode TTF kaydeder). |
 | `_doc_metni_oku` | Eski ikili `.doc`'un ana metnini çıkarır (olefile; WordDocument akışı UTF-16LE, 0x07→tab). Yalnızca okuma. |
-| `sablon_vkn_metinden` / `_blok_vkn` / `sablon_vkn_oku` | Karşı firmanın (vkn, unvan) bilgisini iki belge tipinden de çıkarır: **karşıt inceleme tutanağı** ("NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN") ve **YMM Bilgi İsteme yazısı** ("Hakkında Bilgi İstenilen Mükellef…"). VKN'yi 3 stratejiyle ayıklar: (1) etiketin yanındaki numara ('V.D. – 6120050961'), (2) 'Vergi Dairesi …Nosu' etiket hücresinden sonraki DEĞER hücresi (etikette 'Hesap' gibi ek kelime olsa da), (3) hücre-bazlı son çare (telefon/faks hücreleri atlanır). `.doc`'ta tüm blok TEK satır olabildiğinden atlama hücre bazlıdır (satır bazlı değil). Karışık etiket/telefonla karışmaz. |
+| `sablon_vkn_metinden` / `_blok_vkn` / `sablon_vkn_oku` | Karşı firmanın (vkn, unvan) bilgisini iki belge tipinden de çıkarır: **karşıt inceleme tutanağı** ("NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN") ve **YMM Bilgi İsteme yazısı** ("Hakkında Bilgi İstenilen Mükellef…"). VKN'yi 3 stratejiyle ayıklar: (1) etiketin yanındaki numara ('V.D. – 1000000046'), (2) 'Vergi Dairesi …Nosu' etiket hücresinden sonraki DEĞER hücresi (etikette 'Hesap' gibi ek kelime olsa da), (3) hücre-bazlı son çare (telefon/faks hücreleri atlanır). `.doc`'ta tüm blok TEK satır olabildiğinden atlama hücre bazlıdır (satır bazlı değil). Karışık etiket/telefonla karışmaz. |
 | `_vkn_metinden_ayikla` | Metinden 10-11 haneli VKN/TCKN (boşlukları temizler, 8-9→zfill, yer tutucu geçersiz) — filtreyle aynı normalize. |
 | `sablonlari_indeksle` | Klasördeki `.doc`/`.docx` şablonları VKN→(yol, blok) indeksler. **Çok-firmalı tek `.docx`** (bir dosyada N tutanak) tanınır: her firma bloğu ayrı indekslenir. Uzantı harf duyarsız; **`Hazır Tutanaklar*` çıktı klasörleri atlanır** (önceki doldurulmuş tutanaklar şablon sanılmasın); VKN'si okunamayan dosyalar günlükte listelenir. |
 | `_docx_firma_bloklari` / `_docx_blok_belgesi` / `_sablon_kayitlari` | Birleşik `.docx`'i firma bloklarına ayırır (blok başı = "KATMA DEĞER…TUTANAĞI" başlığı), tek bloğu izole eder, dosyadaki tüm (vkn, unvan, blok) kayıtlarını verir. |
@@ -270,7 +274,7 @@ test et. Bilinen gerçek dosyalarda beklenen gerçek kapsamlar:
 Nisan %94.2, Ocak %82.2, Muhasebe %82.4, **Ağustos 2026 (yeni GİB formatı,
 2 sayfalı .xls, etiketsiz toplam satırlı) → 656 fatura, 39 firma, %95.8**
 (ithalat istisnasından önce %92.2 idi).
-Bu dosyada program çıktısı kullanıcının Excel tutanaklarıyla ve BARSA Word
+Bu dosyada program çıktısı kullanıcının Excel tutanaklarıyla ve bir KİT Word
 tutanağının fatura tablosuyla birebir aynı çıktı. Aynı ayın **YMM 08.2026.doc**
 birleşik dosyası (14 Bilgi İsteme yazısı, .docx'e çevrilerek) şablon klasörü
 yapıldığında seçilen 39 firmadan 13'ü eşleşti ve 13 yazının fatura tablosu
@@ -370,7 +374,7 @@ kullanıcının elle hazırladığıyla birebir aynı çıktı. Gerçek müşter
   yalnız ay başlıklarını değiştirip her KİT'in arkasına koyuyordu. Şimdi devam
   şablonu bir kez seçilir; her KİT'in arkasına ayrı (yatay) bölüm olarak, ay
   başlıkları döneme göre güncellenerek eklenir. YMM yazısına eklenmez. Gerçek
-  dosyalarla (BARSA KİT + devam) LibreOffice'te 3 sayfa (1 dikey + 2 yatay) doğrulandı.
+  dosyalarla (gerçek bir KİT + devam) LibreOffice'te 3 sayfa (1 dikey + 2 yatay) doğrulandı.
 - **KİT Word 2027'de kalkıyor (kullanıcı bilgisi, Ekim 2026):** yalnız Excel tutanak +
   YMM yazısı kalacak. Kuralın çıktı tarihine mi liste dönemine mi göre işleyeceği
   HENÜZ BELLİ DEĞİL → kod DEĞİŞTİRİLMEDİ; o zamana kadar kullanıcı takip dosyasında
@@ -409,7 +413,7 @@ kullanıcının elle hazırladığıyla birebir aynı çıktı. Gerçek müşter
   loglu yazılmıştır). Miktar sütunu kaynak listeden alınır (`sutun_bul(['miktar'])`);
   liste düzeni netleştikçe eşleme gözden geçirilmeli.
 - **Fatura satırları KALIN yazılmaz** (elle hazırlanan tutanaklarda hiç kalın fatura
-  bilgisi yoktur). Gerçek hata (OPUROĞLU GOLD 08-2026.doc): COM yolu tüm veri
+  bilgisi yoktur). Gerçek hata (Ağustos 2026'da exay'ın ürettiği bir KİT .doc): COM yolu tüm veri
   satırlarını silip `Rows.Add()` ile ekliyordu; Word yeni satıra son kalan KALIN
   başlık satırının biçimini kopyaladığı için fatura satırları kalın çıkıyordu
   (başlığı kalın olmayan şablonda çıkmadığından "değişken" görünüyordu). Şimdi
@@ -418,8 +422,8 @@ kullanıcının elle hazırladığıyla birebir aynı çıktı. Gerçek müşter
   satırı run'ları `bold=False`. COM yolu artık testte **sahte Word nesne
   modeliyle** (`_SahteTablo`: `Rows.Add()` son satırın biçimini kopyalar) sınanır.
 - **Word'de faturalar TARİH sırasıyla** dizilir (`_tarihe_gore_sirala`; hem `.docx`
-  hem COM yolu): kaynak liste tutara göre sıralı gelse bile (gerçek vaka: OPUROĞLU
-  GOLD 08-2026) tablo elle hazırlananlar gibi nizami olur. Sıralama KARARLIDIR (aynı
+  hem COM yolu): kaynak liste tutara göre sıralı gelse bile (gerçek vaka: Ağustos
+  2026 KİT) tablo elle hazırlananlar gibi nizami olur. Sıralama KARARLIDIR (aynı
   tarihli faturalar listedeki sırasını korur — böylece Ağustos 2026'nın 13 YMM
-  yazısı ve BARSA tutanağı elle hazırlananlarla hâlâ birebir aynı); tarihi
+  yazısı ve KİT tutanağı elle hazırlananlarla hâlâ birebir aynı); tarihi
   okunamayan sona gider. **Excel tutanağının sırası değişmez** (liste sırası).

@@ -178,7 +178,7 @@ def test_filtrele_buyukten_kucuge_sirali(tmp_path):
 def test_filtrele_vkn_onde_sifir_tamamlama(tmp_path):
     """8-9 haneli VKN'lerde önde eksik sıfır otomatik tamamlanmalı ve geçerli sayılmalı."""
     satirlar = [
-        ("2026-04-01", "A", "N1", 500000, 90000, "KISA VKN FIRMA", "71419747"),  # 8 hane
+        ("2026-04-01", "A", "N1", 500000, 90000, "KISA VKN FIRMA", "71234560"),  # 8 hane
     ]
     kols = ["Alış Faturasının Tarihi", "Alış Faturasının Serisi",
             "Alış Faturasının Sıra No'su", "Alış Faturasının KDV Hariç Tutarı",
@@ -188,7 +188,7 @@ def test_filtrele_vkn_onde_sifir_tamamlama(tmp_path):
     pd.DataFrame(satirlar, columns=kols).to_excel(yol, index=False)
     df = exay.ana_listeyi_oku(str(yol))
     secilen, gecersiz = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
-    assert "0071419747" in secilen     # önde sıfır tamamlandı
+    assert "0071234560" in secilen     # önde sıfır tamamlandı
     assert len(gecersiz) == 0
 
 
@@ -327,7 +327,7 @@ def test_csv_muhasebe_okuma(tmp_path):
     yol = tmp_path / "OCAK_2026.csv"
     icerik = (
         "Hesap Kodu;Tarih;Fatura No;Vergi Kimlik No;Açıklama;Borç;Matrah\n"
-        "191.01;2026-01-10;F1;0071419747;FIRMA A;36000,00;200000,00\n"
+        "191.01;2026-01-10;F1;0071234560;FIRMA A;36000,00;200000,00\n"
         "191.01;2026-01-11;F2;1000000002;FIRMA B;9000,00;50000,00\n"
     )
     yol.write_text(icerik, encoding="cp1254")   # TR Windows kodlaması
@@ -336,7 +336,7 @@ def test_csv_muhasebe_okuma(tmp_path):
     assert exay.kdv_sutunu_bul(list(df.columns)) is not None
     secilen, _ = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
     # 8 haneli VKN önde sıfır tamamlanarak geçerli sayılmalı ve seçilmeli
-    assert "0071419747" in secilen
+    assert "0071234560" in secilen
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -462,10 +462,10 @@ def _tutanak_metni(unvan, vd_hucre):
     """Gerçek tutanak düzenini (sekmeli hücreler) taklit eden sentetik metin."""
     return (
         "KATMA DEĞER VERGİSİ İADESİ KARŞIT İNCELEME TUTANAĞI\n"
-        "YEMİNLİ MALİ MÜŞAVİRİN\t\tAdı Soyadı\tSABRİ HAMAMCI\t\t"
-        "Vergi Dairesi ve Sicil No\tGAZİKENT V.D. / 464 100 8244\t\t"
-        "İADE TALEBİNDE BULUNAN FİRMANIN\t\tÜnvanı\tİNALOĞLU İNŞAAT\t\t"
-        "Vergi Dairesi/Nosu\tŞAHİNBEY / 475 056 9431\t\t"
+        "YEMİNLİ MALİ MÜŞAVİRİN\t\tAdı Soyadı\tAD SOYAD (YMM)\t\t"
+        "Vergi Dairesi ve Sicil No\tGAZİKENT V.D. / 100 000 0040\t\t"
+        "İADE TALEBİNDE BULUNAN FİRMANIN\t\tÜnvanı\tİADE FİRMASI İNŞAAT\t\t"
+        "Vergi Dairesi/Nosu\tŞAHİNBEY / 100 000 0041\t\t"
         "NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN\t\t"
         f"Ünvanı\t{unvan}\t\tVergi Dairesi/Nosu\t{vd_hucre}\t\t"
         "Adresi\tBİR ADRES\t\tİNCELEME DAYANAĞI\t31.01.2026 Tarih ve 09 Sayılı\n"
@@ -474,9 +474,9 @@ def _tutanak_metni(unvan, vd_hucre):
 
 
 def test_vkn_metinden_ayikla():
-    assert exay._vkn_metinden_ayikla("493 061 9102") == "4930619102"   # boşluklu
-    assert exay._vkn_metinden_ayikla("ASIM GÜNDÜZ V.D. – 30490690382") == "30490690382"
-    assert exay._vkn_metinden_ayikla("71419747") == "0071419747"       # 8 hane → zfill
+    assert exay._vkn_metinden_ayikla("100 000 0044") == "1000000044"   # boşluklu
+    assert exay._vkn_metinden_ayikla("ASIM GÜNDÜZ V.D. – 12345678950") == "12345678950"
+    assert exay._vkn_metinden_ayikla("71234560") == "0071234560"       # 8 hane → zfill
     assert exay._vkn_metinden_ayikla("0000000000") is None             # yer tutucu
     assert exay._vkn_metinden_ayikla("yok") is None
 
@@ -484,14 +484,14 @@ def test_vkn_metinden_ayikla():
 def test_sablon_vkn_metinden():
     # 10 haneli VKN (boşluklu) doğru bloktan alınmalı, ünvan da
     vkn, unvan = exay.sablon_vkn_metinden(
-        _tutanak_metni("MESAKO MADEN VE ENERJİ TİC. LTD. ŞTİ.", "ŞAHİNBEY V.D. 6190914983"))
-    assert vkn == "6190914983"
-    assert "MESAKO" in unvan
+        _tutanak_metni("MU MADEN VE ENERJİ TİC. LTD. ŞTİ.", "ŞAHİNBEY V.D. 1000000047"))
+    assert vkn == "1000000047"
+    assert "MU MADEN" in unvan
     # 11 haneli TCKN + tire ile
     vkn2, unvan2 = exay.sablon_vkn_metinden(
-        _tutanak_metni("ONUR FURKAN KARTA", "ASIM GÜNDÜZ V.D. – 30490690382"))
-    assert vkn2 == "30490690382"
-    assert unvan2 == "ONUR FURKAN KARTA"
+        _tutanak_metni("ŞAHIS FİRMA SAHİBİ", "ASIM GÜNDÜZ V.D. – 12345678950"))
+    assert vkn2 == "12345678950"
+    assert unvan2 == "ŞAHIS FİRMA SAHİBİ"
     # Blok yoksa (ör. üst yazı) → (None, None)
     assert exay.sablon_vkn_metinden("Sayı: YMM 27103572 ... GAZİANTEP") == (None, None)
 
@@ -655,10 +655,10 @@ def _docx_sablon_yaz(yol, unvan, vd_hucre):
     d = docx.Document()
     t0 = d.add_table(rows=0, cols=2)
     for etiket, deger in [
-        ("YEMİNLİ MALİ MÜŞAVİRİN", "SABRİ HAMAMCI"),
+        ("YEMİNLİ MALİ MÜŞAVİRİN", "AD SOYAD (YMM)"),
         ("İADE TALEBİNDE BULUNAN FİRMANIN", "İADE TALEBİNDE BULUNAN FİRMANIN"),
-        ("Ünvanı", "İNALOĞLU İNŞAAT"),
-        ("Vergi Dairesi/Nosu", "ŞAHİNBEY / 475 056 9431"),
+        ("Ünvanı", "İADE FİRMASI İNŞAAT"),
+        ("Vergi Dairesi/Nosu", "ŞAHİNBEY / 100 000 0041"),
         ("NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN", "NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN"),
         ("Ünvanı", unvan),
         ("Vergi Dairesi/Nosu", vd_hucre),
@@ -677,10 +677,10 @@ def _docx_sablon_yaz(yol, unvan, vd_hucre):
 
 def test_docx_sablon_vkn_oku(tmp_path):
     yol = tmp_path / "ispa.docx"
-    _docx_sablon_yaz(yol, "İSPA İNŞ. SAN. PAZ. A.Ş.", "ÜSKÜDAR V.D. – 481 001 7371")
+    _docx_sablon_yaz(yol, "OMEGA İNŞ. SAN. PAZ. A.Ş.", "ÜSKÜDAR V.D. – 100 000 0045")
     vkn, unvan = exay.sablon_vkn_oku(str(yol))
-    assert vkn == "4810017371"                       # boşluklu VKN düzeltilir
-    assert "İSPA" in unvan
+    assert vkn == "1000000045"                       # boşluklu VKN düzeltilir
+    assert "OMEGA" in unvan
 
 
 def test_sablonlari_indeksle_docx_dahil(tmp_path):
@@ -692,7 +692,7 @@ def test_sablonlari_indeksle_docx_dahil(tmp_path):
 def test_firma_docx_olustur_tabloyu_doldurur(tmp_path):
     import docx
     sablon = tmp_path / "sablon.docx"
-    _docx_sablon_yaz(sablon, "İSPA İNŞ. SAN. PAZ. A.Ş.", "V.D. 4810017371")
+    _docx_sablon_yaz(sablon, "OMEGA İNŞ. SAN. PAZ. A.Ş.", "V.D. 1000000045")
     # iki faturalı bir firma
     kols = ["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su",
             "Alınan Mal ve/veya Hizmetin Cinsi", "Alınan Mal ve/veya Hizmetin Miktarı",
@@ -726,7 +726,7 @@ def test_dosyalari_isle_docx_word_uretir(tmp_path):
     exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
                         sablon_klasor=str(sk))
     uretilen = list((tmp_path / "Hazır Tutanaklar").glob("*.docx"))
-    assert any("FIRMA A" in p.name for p in uretilen), "İSPA benzeri Word tutanağı üretilmedi"
+    assert any("FIRMA A" in p.name for p in uretilen), "OMEGA benzeri Word tutanağı üretilmedi"
     assert not any("1000000001" in p.name for p in uretilen), "Word adında VKN olmamalı"
 
 
@@ -789,7 +789,7 @@ def test_ascii_kucuk_turkce():
 def test_inceleme_dayanagi_docx_gunceller(tmp_path):
     import docx
     sablon = tmp_path / "s.docx"
-    _docx_sablon_yaz(sablon, "İSPA A.Ş.", "V.D. 4810017371")
+    _docx_sablon_yaz(sablon, "OMEGA A.Ş.", "V.D. 1000000045")
     kols = ["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su",
             "Alınan Mal ve/veya Hizmetin Cinsi", "Alınan Mal ve/veya Hizmetin Miktarı",
             "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı", "KDV'si"]
@@ -965,23 +965,23 @@ def test_ymm_yazisi_vkn_eslesme():
     # Etiketler karışık olabilir (Adresi hücresinde V.D./VKN) ve telefon var
     metin = (
         "Sayı : YMM 27103572/2026-363\tGAZİANTEP\n"
-        "İade Talebinde Bulunan Firma\t\tUnvanı\tİNALOĞLU İNŞAAT\t\t"
-        "Adresi\tŞAHİNBEY / 475 056 9431\t\tTelefon/Fax\t0 342 502 03 15\n"
+        "İade Talebinde Bulunan Firma\t\tUnvanı\tİADE FİRMASI İNŞAAT\t\t"
+        "Adresi\tŞAHİNBEY / 100 000 0041\t\tTelefon/Fax\t0 342 000 03 15\n"
         "Hakkında Bilgi İstenilen Mükellefin Altı\t\t"
-        "Ünvanı\tOYAK ÇİMENTO FABRİKALARI ANONİM ŞİRKETİ\t\t"
-        "Adresi\tANKARA KURUMLAR V.D. – 6120050961\t\t"
+        "Ünvanı\tSİGMA ÇİMENTO FABRİKALARI ANONİM ŞİRKETİ\t\t"
+        "Adresi\tANKARA KURUMLAR V.D. – 1000000046\t\t"
         "Vergi Dairesi/Hesap Nosu\tÇUKURAMBAR MAH. 1480 SK.\t\t"
-        "Telefon/Fax\t0 312 220 0290\n"
+        "Telefon/Fax\t0 312 000 0290\n"
         "İNCELEME DAYANAĞI\t31.01.2026 Tarih ve 09 Sayılı\n"
     )
     vkn, unvan = exay.sablon_vkn_metinden(metin)
-    assert vkn == "6120050961"          # karşı firma (telefon 03122200290 DEĞİL)
-    assert "OYAK" in unvan
+    assert vkn == "1000000046"          # karşı firma (telefon 03120000290 DEĞİL)
+    assert "SİGMA" in unvan
 
 
 def test_blok_vkn_telefon_karistirmaz():
-    blok = "Ünvanı\tX A.Ş.\tTelefon/Fax\t0 342 215 10 70\tVergi Dairesi\tŞAHİNBEY V.D. 6190914983"
-    assert exay._blok_vkn(blok) == "6190914983"
+    blok = "Ünvanı\tX A.Ş.\tTelefon/Fax\t0 342 000 10 70\tVergi Dairesi\tŞAHİNBEY V.D. 1000000047"
+    assert exay._blok_vkn(blok) == "1000000047"
 
 
 # ── YMM yazısı: fatura tablosunun son sütunu 'KDV dahil toplam' (tutanakta boş) ──
@@ -998,7 +998,7 @@ def _ymm_yazi_docx_yaz(yol, unvan, vd_hucre):
         ("Hakkında Bilgi İstenilen Mükellefin", "Hakkında Bilgi İstenilen Mükellefin"),
         ("Ünvanı", unvan),
         ("Vergi Dairesi/Hesap Nosu", vd_hucre),
-        ("Telefon/Fax", "0 312 220 0290"),
+        ("Telefon/Fax", "0 312 000 0290"),
         ("İNCELEME DAYANAĞI", "31.01.2026 Tarih ve 09 Sayılı"),
     ]:
         r = t0.add_row().cells
@@ -1024,7 +1024,7 @@ def _ornek_firma_df():
 def test_ymm_yazi_fatura_kdv_dahil_toplam(tmp_path):
     import docx
     sablon = tmp_path / "ymm.docx"
-    _ymm_yazi_docx_yaz(sablon, "OYAK ÇİMENTO FABRİKALARI A.Ş.", "ANKARA KURUMLAR V.D. – 6120050961")
+    _ymm_yazi_docx_yaz(sablon, "SİGMA ÇİMENTO FABRİKALARI A.Ş.", "ANKARA KURUMLAR V.D. – 1000000046")
     firma, kols = _ornek_firma_df()
     cikti = tmp_path / "ymm_cikti.docx"
     exay.firma_docx_olustur(str(sablon), firma, str(cikti), kols)
@@ -1043,7 +1043,7 @@ def test_ymm_yazi_fatura_kdv_dahil_toplam(tmp_path):
 def test_tutanak_defter_kayit_bos(tmp_path):
     import docx
     sablon = tmp_path / "tut.docx"
-    _docx_sablon_yaz(sablon, "İSPA A.Ş.", "V.D. 4810017371")
+    _docx_sablon_yaz(sablon, "OMEGA A.Ş.", "V.D. 1000000045")
     firma, kols = _ornek_firma_df()
     cikti = tmp_path / "tut_cikti.docx"
     exay.firma_docx_olustur(str(sablon), firma, str(cikti), kols)
@@ -1091,10 +1091,10 @@ def test_fatura_fazla_sutun_proto_sizmaz_ve_uyarir(tmp_path):
 
 
 def test_ymm_yazi_vkn_indekslenir(tmp_path):
-    _ymm_yazi_docx_yaz(tmp_path / "oyak.docx", "OYAK ÇİMENTO A.Ş.",
-                       "ANKARA KURUMLAR V.D. – 6120050961")
+    _ymm_yazi_docx_yaz(tmp_path / "oyak.docx", "SİGMA ÇİMENTO A.Ş.",
+                       "ANKARA KURUMLAR V.D. – 1000000046")
     idx = exay.sablonlari_indeksle(str(tmp_path))
-    assert idx["6120050961"][0].endswith("oyak.docx")          # YMM yazısı da indekslenir
+    assert idx["1000000046"][0].endswith("oyak.docx")          # YMM yazısı da indekslenir
 
 
 def test_birlesik_ymm_yazi_bloklara_ayrilir(tmp_path):
@@ -1103,7 +1103,7 @@ def test_birlesik_ymm_yazi_bloklara_ayrilir(tmp_path):
     from copy import deepcopy
     from docx.oxml.ns import qn
     tek = tmp_path / "tek.docx"
-    _ymm_yazi_docx_yaz(tek, "OYAK ÇİMENTO A.Ş.", "ANKARA KURUMLAR V.D. – 6120050961")
+    _ymm_yazi_docx_yaz(tek, "SİGMA ÇİMENTO A.Ş.", "ANKARA KURUMLAR V.D. – 1000000046")
     d = docx.Document(str(tek))
     body = d.element.body
     els = [e for e in body if e.tag in (qn('w:p'), qn('w:tbl'))]
@@ -1113,7 +1113,7 @@ def test_birlesik_ymm_yazi_bloklara_ayrilir(tmp_path):
         body.insert(list(body).index(sect), yeni) if sect is not None else body.append(yeni)
     bloklar = exay._docx_firma_bloklari(d)
     assert len(bloklar) == 2
-    assert all(b["vkn"] == "6120050961" for b in bloklar)
+    assert all(b["vkn"] == "1000000046" for b in bloklar)
 
 
 def test_fatura_son_sutun_dahil():
@@ -1134,8 +1134,8 @@ def test_word_dosya_adi_ilk_uc_kelime_donem():
     ) == "1) İNNOVA MİMARLIK AHŞAP 07-2026.docx"
     # YMM yazısı: başına 'YMM '
     assert exay._word_tutanak_adi(
-        1, "OYAK ÇİMENTO FABRİKALARI ANONİM ŞİRKETİ", "07.2026", ".docx", ymm=True
-    ) == "1) YMM OYAK ÇİMENTO FABRİKALARI 07-2026.docx"
+        1, "SİGMA ÇİMENTO FABRİKALARI ANONİM ŞİRKETİ", "07.2026", ".docx", ymm=True
+    ) == "1) YMM SİGMA ÇİMENTO FABRİKALARI 07-2026.docx"
     # Boş şablon eki
     assert exay._word_tutanak_adi(3, "X A.Ş.", "12.2025", ".docx", ek="BOŞ") \
         == "3) X A.Ş. 12-2025 BOŞ.docx"
@@ -1167,7 +1167,7 @@ def test_ymm_yazi_sayi_basligi_silinmez(tmp_path):
     d.add_paragraph("Sayın, NURULLAH TOSUN")
     t0 = d.add_table(rows=0, cols=2)
     for e, v in [("Hakkında Bilgi İstenilen Mükellefin", "Hakkında Bilgi İstenilen Mükellefin"),
-                 ("Ünvanı", "EVYAPAN DEMİR A.Ş."),
+                 ("Ünvanı", "THETA DEMİR A.Ş."),
                  ("Vergi Dairesi/Nosu", "ŞEHİTKAMİL V.D. – 3830025675")]:
         r = t0.add_row().cells
         r[0].text = e; r[1].text = v
@@ -1308,26 +1308,26 @@ def test_varyant_basliklarla_uctan_uca(tmp_path):
 def test_ymm_vergi_dairesi_hesap_nosu_ve_tek_satir_doc():
     """YMM .doc: karşı firma bloğu tek satırda (tab'lı), etiket 'Vergi Dairesi/
     Hesap Nosu', ve blokta 'Telefon/Fax' de var. VKN değer hücresinden gelmeli,
-    telefon VKN sanılmamalı (gerçek TIRSAN .doc bu düzendeydi)."""
+    telefon VKN sanılmamalı (gerçek TAU .doc bu düzendeydi)."""
     metin = (
         "Konu : Bilgi İsteme\n"
         "Hakkında Bilgi İstenilen Mükellefin Altı\t\t"
-        "Ünvanı\tTIRSAN TREYLER SAN. VE TİC. A.Ş.\t\t"
-        "Vergi Dairesi/Hesap Nosu\tALİ FUAT CEBESOY / 844 005 7150\t\t"
+        "Ünvanı\tTAU TREYLER SAN. VE TİC. A.Ş.\t\t"
+        "Vergi Dairesi/Hesap Nosu\tALİ FUAT CEBESOY / 100 000 0043\t\t"
         "Adresi\tADLİYE MAH. 1520 NOLU SOK. NO:3 ARİFİYE / SAKARYA\t\t"
-        "Telefon/Fax\t0 264 295 30 00\n"
+        "Telefon/Fax\t0 264 000 30 00\n"
         "İNCELEME DAYANAĞI\t31.01.2023 Tarih ve 11 Sayılı\n"
     )
     vkn, unvan = exay.sablon_vkn_metinden(metin)
-    assert vkn == "8440057150"                 # değer hücresindeki VKN (telefon değil)
-    assert "TIRSAN" in unvan
+    assert vkn == "1000000043"                 # değer hücresindeki VKN (telefon değil)
+    assert "TAU" in unvan
 
 
 def test_blok_vkn_tek_satir_telefon_atlanir():
     # Her şey tek satırda; telefon hücresi VKN sanılmamalı, V.D. değeri seçilmeli
-    blok = ("Ünvanı\tX A.Ş.\tVergi Dairesi/Hesap Nosu\tKADIKÖY / 493 061 9102\t"
+    blok = ("Ünvanı\tX A.Ş.\tVergi Dairesi/Hesap Nosu\tKADIKÖY / 100 000 0044\t"
             "Telefon/Fax\t0 216 000 00 00")
-    assert exay._blok_vkn(blok) == "4930619102"
+    assert exay._blok_vkn(blok) == "1000000044"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1614,9 +1614,9 @@ def test_tek_docx_birlestirme_resim_iliskileri(tmp_path):
 
 
 def test_mukerrer_fatura_vkn_normalize():
-    df = pd.DataFrame({"Satıcının Vergi Kimlik Numarası": ["71419747", "0071419747"],
+    df = pd.DataFrame({"Satıcının Vergi Kimlik Numarası": ["71234560", "0071234560"],
                        "Alış Faturasının Sıra No'su": ["F1", "F1"]})
-    assert exay.mukerrer_fatura_bul(df) == [("0071419747", "F1", 2)]
+    assert exay.mukerrer_fatura_bul(df) == [("0071234560", "F1", 2)]
 
 
 def test_gui_firma_yok_hata_sayilmaz():
@@ -1646,12 +1646,12 @@ def _gib_yeni_bicim_yaz(yol, toplam_satiri=True, toplam=None):
     for c, b in enumerate(bas, 2):
         ws.cell(4, c, value=b)
     satirlar = [
-        ("ATAKAŞ ÇELİK", "0950303776", 1350916.0),     # tek fatura ≥150K
-        ("AY PROFİL",    "1060068320", 650007.32),
+        ("ALFA ÇELİK", "1000000021", 1350916.0),     # tek fatura ≥150K
+        ("BETA PROFİL",    "1000000022", 650007.32),
         ("KÜÇÜK A",      "1000000001", 40000.0),
         ("KÜÇÜK B",      "1000000002", 30000.0),
         ("KÜÇÜK C",      "1000000003", 20000.0),
-        ("RHEINZINK GMBH", "1111111111", 60000.0),      # yabancı → geçersiz VKN, paydada KALIR
+        ("YABANCI GMBH", "1111111111", 60000.0),      # yabancı → geçersiz VKN, paydada KALIR
     ]
     for i, (u, v, t) in enumerate(satirlar, 1):
         ws.append([None, i, exay.datetime(2026, 8, i), None, f"F{i}", u, v, "MAL", "1 AD",
@@ -1673,9 +1673,9 @@ def test_etiketsiz_toplam_satiri_tum_firmalari_sectirmez(tmp_path):
     assert len(df) == 6
     assert df.attrs["toplam_satirlari"] == [("TOPLAM (etiketsiz)", gercek_toplam)]
     sec, gecersiz = exay.firmalari_filtrele(df, 150000, 450000, 80, _sessiz)
-    # Payda = gerçek liste toplamı (RHEINZINK dahil, §2.3); 2 firma %80'i karşılar
-    assert set(sec) == {"0950303776", "1060068320"}
-    assert len(gecersiz) == 1                                  # yalnız RHEINZINK
+    # Payda = gerçek liste toplamı (YABANCI GMBH dahil, §2.3); 2 firma %80'i karşılar
+    assert set(sec) == {"1000000021", "1000000022"}
+    assert len(gecersiz) == 1                                  # yalnız YABANCI GMBH
 
 
 def test_etiketsiz_satir_tutar_tutmazsa_kalir(tmp_path):
@@ -1711,8 +1711,8 @@ def _ymm_birlesik_bosluklu_yaz(yol, firmalar, bos_satir=30):
         d.add_paragraph("Konu: Bilgi İsteme          30.09.2026")
         t = d.add_table(rows=0, cols=2)
         for a, b in [("İADE TALEBİNDE BULUNAN FİRMANIN", "İADE TALEBİNDE BULUNAN FİRMANIN"),
-                     ("Ünvanı", "ESKA METAL SAN. TİC. A.Ş."),
-                     ("Vergi Dairesi/Nosu", "ŞEHİTKAMİL / 380 119 8516"),
+                     ("Ünvanı", "İADE TALEP EDEN SAN. A.Ş."),
+                     ("Vergi Dairesi/Nosu", "ŞEHİTKAMİL / 100 000 0042"),
                      ("HAKKINDA BİLGİ İSTENİLEN MÜKELLEFİN", "HAKKINDA BİLGİ İSTENİLEN MÜKELLEFİN"),
                      ("Ünvanı", unvan), ("Vergi Dairesi/Nosu", vd),
                      ("İNCELEME DAYANAĞI", "04.03.2026 Tarih ve 46 Sayılı")]:
@@ -1720,7 +1720,7 @@ def _ymm_birlesik_bosluklu_yaz(yol, firmalar, bos_satir=30):
         f = d.add_table(rows=2, cols=6)
         for c, v in enumerate(["F.TARİHİ", "F. NOSU", "MALIN CİNSİ", "MALIN MİKTARI", "MATRAH", "KDV"]):
             f.rows[0].cells[c].text = v
-        d.add_paragraph("SABRİ HAMAMCI")
+        d.add_paragraph("AD SOYAD (YMM)")
         for _ in range(bos_satir):
             d.add_paragraph("")
     d.save(yol)
@@ -1733,14 +1733,14 @@ def test_ymm_birlesik_blok_sondaki_bos_satirlar_silinir_ve_6_sutun_uyarmaz(tmp_p
     import docx
     from docx.oxml.ns import qn
     yol = tmp_path / "YMM 08.2026.docx"
-    _ymm_birlesik_bosluklu_yaz(yol, [("ATAKAŞ ÇELİK SAN. VE TİC. A.Ş.", "DÖRTYOL V.D. / 095 030 3776"),
-                                     ("TEZCAN GALVANİZLİ A.Ş.", "BEYKOZ V.D. / 841 005 2600")])
+    _ymm_birlesik_bosluklu_yaz(yol, [("ALFA ÇELİK SAN. VE TİC. A.Ş.", "DÖRTYOL V.D. / 100 000 0021"),
+                                     ("GAMA GALVANİZ A.Ş.", "BEYKOZ V.D. / 100 000 0023")])
     kay = exay._sablon_kayitlari(str(yol))
-    assert [k[0] for k in kay] == ["0950303776", "8410052600"]
+    assert [k[0] for k in kay] == ["1000000021", "1000000023"]
     d = exay._docx_blok_belgesi(str(yol), 0)
     from docx.text.paragraph import Paragraph
     son = [el for el in d.element.body if el.tag in (qn('w:p'), qn('w:tbl'))][-1]
-    assert Paragraph(son, d).text.strip() == "SABRİ HAMAMCI"         # sonda boş satır yok
+    assert Paragraph(son, d).text.strip() == "AD SOYAD (YMM)"         # sonda boş satır yok
     uyarilar = []
     out = tmp_path / "o.docx"
     firma, kols = _ornek_firma_df()
@@ -1842,28 +1842,28 @@ _KIT_BASLIK = [(["FATURANIN", "FATURANIN", "MALIN", "MALIN", "MALIN", "MALIN", "
 def _uc_fatura():
     kols = ["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su", "Alınan Mal ve/veya Hizmetin Cinsi",
             "Alınan Mal ve/veya Hizmetin Miktarı", "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı", "KDV'si"]
-    df = pd.DataFrame([["2026-08-03", "CGT1", "JÜT İPLİK", "3255,30 Kg", 198573.3, 19857.33],
-                       ["2026-08-05", "CGT2", "JÜT İPLİK", "3461 Kg", 211121.0, 21112.1],
-                       ["2026-08-08", "CGT3", "JÜT İPLİK", "3425,80 Kg", 208973.8, 20897.38]], columns=kols)
+    df = pd.DataFrame([["2026-08-03", "FT1", "JÜT İPLİK", "3255,30 Kg", 190000.0, 19000.0],
+                       ["2026-08-05", "FT2", "JÜT İPLİK", "3461 Kg", 210000.0, 21000.0],
+                       ["2026-08-08", "FT3", "JÜT İPLİK", "3425,80 Kg", 200000.0, 20000.0]], columns=kols)
     return df, kols
 
 
 @pytest.mark.parametrize("ornek_satir", [True, False])
 def test_word_com_fatura_satirlari_kalin_degil(tmp_path, monkeypatch, ornek_satir):
-    """GERÇEK HATA (OPUROĞLU GOLD 08-2026.doc): COM yolu tüm veri satırlarını silip
+    """GERÇEK HATA (gerçek KİT, Ağustos 2026): COM yolu tüm veri satırlarını silip
     Rows.Add() ile ekliyordu; Word yeni satıra son kalan KALIN başlık satırının
     biçimini kopyaladığından fatura bilgileri kalın çıkıyordu. Elle hazırlanan
     tutanaklarda fatura satırı hiçbir zaman kalın değildir."""
     satirlar = list(_KIT_BASLIK)
     if ornek_satir:   # şablonda eski firmanın verisiyle normal (kalın olmayan) bir satır
-        satirlar.append((["31.03.2026", "CEF51", "Bobin İplik", "1 Adet", "2.811.358,00", "562.271,60", ""], False))
+        satirlar.append((["31.03.2026", "ESK51", "Bobin İplik", "1 Adet", "2.000.000,00", "400.000,00", ""], False))
     tablo = _SahteTablo(satirlar)
     _sahte_word_kur(monkeypatch, tablo)
     df, kols = _uc_fatura()
     exay.firma_word_olustur(str(tmp_path / "sablon.doc"), df, str(tmp_path / "cikti.doc"), kols)
     veri = tablo.satirlar[2:]
     assert len(veri) == 3                                            # eski veri gitti, 3 fatura
-    assert [s._h[1].metin for s in veri] == ["CGT1", "CGT2", "CGT3"]
+    assert [s._h[1].metin for s in veri] == ["FT1", "FT2", "FT3"]
     assert not any(h.kalin for s in veri for h in s._h)              # hiçbiri kalın değil
     assert all(h.kalin for s in tablo.satirlar[:2] for h in s._h)    # başlıklar kalın kaldı
     assert "Bobin" not in " ".join(h.metin for s in veri for h in s._h)
@@ -1889,18 +1889,18 @@ def test_docx_fatura_satirlari_kalin_degil(tmp_path):
 
 
 def _karisik_sirali_faturalar():
-    """Liste tutara göre sıralı gelmiş (gerçek vaka: OPUROĞLU GOLD 08-2026)."""
+    """Liste tutara göre sıralı gelmiş (gerçek vaka: gerçek KİT, Ağustos 2026)."""
     kols = ["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su", "Alınan Mal ve/veya Hizmetin Cinsi",
             "Alınan Mal ve/veya Hizmetin Miktarı", "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı", "KDV'si"]
-    df = pd.DataFrame([["18.08.2026", "CGT610", "JÜT", "1 KG", 225004.6, 22500.46],
-                       ["05.08.2026", "CGT575", "JÜT", "1 KG", 211121.0, 21112.1],
-                       ["okunamayan", "CGT999", "JÜT", "1 KG", 200000.0, 20000.0],
-                       ["18.08.2026", "CGT609", "JÜT", "1 KG", 88572.0, 8857.2],     # aynı tarih: liste sırası
-                       [exay.datetime(2026, 8, 3), "CGT565", "JÜT", "1 KG", 198573.3, 19857.33]],
+    df = pd.DataFrame([["18.08.2026", "FT610", "JÜT", "1 KG", 220000.0, 22000.0],
+                       ["05.08.2026", "FT575", "JÜT", "1 KG", 210000.0, 21000.0],
+                       ["okunamayan", "FT999", "JÜT", "1 KG", 200000.0, 20000.0],
+                       ["18.08.2026", "FT609", "JÜT", "1 KG", 88000.0, 8800.0],     # aynı tarih: liste sırası
+                       [exay.datetime(2026, 8, 3), "FT565", "JÜT", "1 KG", 190000.0, 19000.0]],
                       columns=kols)
     return df, kols
 
-_BEKLENEN_SIRA = ["CGT565", "CGT575", "CGT610", "CGT609", "CGT999"]
+_BEKLENEN_SIRA = ["FT565", "FT575", "FT610", "FT609", "FT999"]
 
 
 def test_word_faturalar_tarih_sirasinda_docx(tmp_path):
@@ -1932,35 +1932,35 @@ def test_excel_tutanak_sirasi_degismez(tmp_path):
 
 
 def _ithalatli_liste(yol):
-    """Yeni GİB biçimi + 'GGB Tescil No'su (Alış İthalat İse)' sütunu; RHEINZINK
+    """Yeni GİB biçimi + 'GGB Tescil No'su (Alış İthalat İse)' sütunu; YABANCI GMBH
     satırı GERÇEK dosyadaki gibi yer tutucu VKN (1111111111) + dolu GGB."""
     kols = ["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su", "Satıcının Adı-Soyadı / Ünvanı",
             "Satıcının Vergi Kimlik Numarası / TC Kimlik Numarası",
             "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı", "KDV'si", "GGB Tescil No'su (Alış İthalat İse)"]
     pd.DataFrame([
-        ["2026-08-01", "A1", "ATAKAŞ", "0950303776", 200000, 40000, None],
+        ["2026-08-01", "A1", "ALFA", "1000000021", 200000, 40000, None],
         ["2026-08-02", "B1", "KÜÇÜK B", "1000000002", 30000, 6000, None],
         ["2026-08-03", "C1", "KÜÇÜK C", "1000000003", 20000, 4000, None],
-        ["2026-08-04", "00196927", "RHEINZINK GMBH& CO .KG", "1111111111", 750000, 150000, "26341200IM00196927"],
+        ["2026-08-04", "00000001", "YABANCI GMBH & CO. KG", "1111111111", 750000, 150000, "26000000IM00000001"],
     ], columns=kols).to_excel(yol, index=False)
 
 
 def test_ithalat_yuzde80_hesabina_katilmaz(tmp_path):
     """Kullanıcı kararı: ithalat (GGB'li) satırlar %80'e katılmaz; tutanaklanmaz,
-    'geçersiz VKN' de sayılmaz. (Eskiden RHEINZINK paydada kalıyordu.)"""
+    'geçersiz VKN' de sayılmaz. (Eskiden YABANCI GMBH paydada kalıyordu.)"""
     yol = tmp_path / "AGUSTOS_2026.xlsx"
     _ithalatli_liste(yol)
     df = exay.ana_listeyi_oku(str(yol))
     yurtici, ithalat = exay.ithalat_satirlarini_ayir(df)
-    assert len(yurtici) == 3 and list(ithalat.iloc[:, 2]) == ["RHEINZINK GMBH& CO .KG"]
+    assert len(yurtici) == 3 and list(ithalat.iloc[:, 2]) == ["YABANCI GMBH & CO. KG"]
     loglar = []
     sec, gecersiz = exay.firmalari_filtrele(df, 150000, 450000, 80,
                                             lambda m, t='': loglar.append(m))
     assert len(gecersiz) == 0                                   # ithalat geçersiz sayılmaz
     assert "1111111111" not in sec
     assert any("ithalat" in m for m in loglar)
-    # Payda = 250.000 (yurtiçi): ATAKAŞ 200K = %80 → 2. aşama gerekmez
-    assert list(sec) == ["0950303776"]
+    # Payda = 250.000 (yurtiçi): ALFA 200K = %80 → 2. aşama gerekmez
+    assert list(sec) == ["1000000021"]
     wb, kapsam = exay.ozet_rapor_olustur(df, sec, gecersiz, 150000, 450000, 80, "08.2026", 1, 0)
     assert kapsam == pytest.approx(80.0)
     etiketler = {wb.active.cell(r, 1).value: wb.active.cell(r, 2).value for r in range(1, 30)}
@@ -2034,7 +2034,7 @@ def test_kit_arkasina_devam_ayri_yatay_bolum(tmp_path):
     import docx
     from docx.enum.section import WD_ORIENT
     sablon = tmp_path / "kit.docx"
-    _docx_sablon_yaz(sablon, "İSPA İNŞ. SAN. PAZ. A.Ş.", "V.D. 4810017371")
+    _docx_sablon_yaz(sablon, "OMEGA İNŞ. SAN. PAZ. A.Ş.", "V.D. 1000000045")
     kit = docx.Document(str(sablon)); kit.styles['Normal'].font.name = "Cambria"
     stil = kit.styles['Light Grid Accent 1'].element
     stil.getparent().remove(stil)                                  # KİT'te bu stil YOK
@@ -2063,7 +2063,7 @@ def test_kit_arkasina_devam_ayri_yatay_bolum(tmp_path):
 def test_ymm_yazisina_devam_eklenmez(tmp_path):
     import docx
     sablon = tmp_path / "ymm.docx"
-    _ymm_yazi_docx_yaz(sablon, "OYAK ÇİMENTO FABRİKALARI A.Ş.", "ANKARA KURUMLAR V.D. – 6120050961")
+    _ymm_yazi_docx_yaz(sablon, "SİGMA ÇİMENTO FABRİKALARI A.Ş.", "ANKARA KURUMLAR V.D. – 1000000046")
     _devam_docx_yaz(tmp_path / "devam.docx")
     devam = exay.devam_sayfasi_hazirla(str(tmp_path / "devam.docx"), "01.2027")
     firma, kols = _ornek_firma_df()
@@ -2079,7 +2079,7 @@ def test_tek_dosyada_her_firmanin_devami_korunur(tmp_path):
     import docx
     from docx.enum.section import WD_ORIENT
     sablon = tmp_path / "kit.docx"
-    _docx_sablon_yaz(sablon, "İSPA A.Ş.", "V.D. 4810017371")
+    _docx_sablon_yaz(sablon, "OMEGA A.Ş.", "V.D. 1000000045")
     _devam_docx_yaz(tmp_path / "devam.docx")
     devam = exay.devam_sayfasi_hazirla(str(tmp_path / "devam.docx"), "01.2027")
     firma, kols = _ornek_firma_df()
@@ -2114,7 +2114,7 @@ def test_normal_bicimi_ayni_ise_dokunulmaz(tmp_path):
 # ── YMM yazısı: üstteki tarih = çıktının alındığı gün ──
 def _ymm_tarihli_yaz(yol, konu="Konu : Bilgi İsteme\t\t\t30.09.2026"):
     import docx
-    _ymm_yazi_docx_yaz(yol, "OYAK ÇİMENTO FABRİKALARI A.Ş.", "ANKARA KURUMLAR V.D. – 6120050961")
+    _ymm_yazi_docx_yaz(yol, "SİGMA ÇİMENTO FABRİKALARI A.Ş.", "ANKARA KURUMLAR V.D. – 1000000046")
     d = docx.Document(str(yol))
     p = next(p for p in d.paragraphs if p.text.startswith("Konu"))
     p.text = konu
@@ -2192,7 +2192,7 @@ def _sahte_cevirici_kur(monkeypatch, tmp_path, kaynak_docx):
 
 
 def test_doc_docx_cevrilir_ve_onbellekten_kullanilir(tmp_path, monkeypatch):
-    _docx_sablon_yaz(tmp_path / "kaynak.docx", "İSPA A.Ş.", "V.D. 4810017371")
+    _docx_sablon_yaz(tmp_path / "kaynak.docx", "OMEGA A.Ş.", "V.D. 1000000045")
     sayac = _sahte_cevirici_kur(monkeypatch, tmp_path, tmp_path / "kaynak.docx")
     doc = tmp_path / "ISPA.doc"; doc.write_bytes(b"eski ikili doc")
     s1 = exay._doclari_docx_cevir([doc])
@@ -2205,12 +2205,12 @@ def test_doc_docx_cevrilir_ve_onbellekten_kullanilir(tmp_path, monkeypatch):
 
 
 def test_doc_sablon_indekslenince_docx_yolundan_uretilir(tmp_path, monkeypatch):
-    _docx_sablon_yaz(tmp_path / "kaynak.docx", "İSPA A.Ş.", "V.D. 4810017371")
+    _docx_sablon_yaz(tmp_path / "kaynak.docx", "OMEGA A.Ş.", "V.D. 1000000045")
     _sahte_cevirici_kur(monkeypatch, tmp_path, tmp_path / "kaynak.docx")
     sk = tmp_path / "sablonlar"; sk.mkdir()
     (sk / "ISPA.doc").write_bytes(b"eski ikili doc")
     idx = exay.sablonlari_indeksle(str(sk))
-    yol, _blok = exay._sablon_yol_blok(idx["4810017371"])
+    yol, _blok = exay._sablon_yol_blok(idx["1000000045"])
     assert yol.endswith(".docx")                           # COM ile yerinde düzenleme yok
 
 
@@ -2255,15 +2255,15 @@ def test_takip_dosyasi_eski_bicim_tur_cikarimi(tmp_path):
     (gerçek Ağustos 2026 dosyasında 24 Excel / 3 KİT ile birebir doğrulandı)."""
     yol = tmp_path / "01 FİRMA VE MUH. BİLGİLERİ AĞUSTOS 2026.xlsx"
     _eski_takip_yaz(yol, [
-        {'SR': 1, 'FİRMA': 'ATAKAŞ ÇELİK A.Ş.', 'KDV': 10, 'YMM': 'MEHMET AKINCI'},
-        {'SR': 2, 'FİRMA': 'AY PROFİL LTD. ŞTİ.', 'KDV': 9, 'BELGE ID': '01a0f245190871d5'},
-        {'SR': 3, 'FİRMA': 'TEKİZ BAĞLANTI', 'KDV': 8, 'AÇIKLAMA': 'SİSTEMDEN GÖNDERİLECEK'},
-        {'SR': 4, 'FİRMA': 'BARSA YALITIM', 'KDV': 7, 'AÇIKLAMA': 'FİRMA TUTANAK',
-         'TELEFONU': '0 212 611 99 00'},
+        {'SR': 1, 'FİRMA': 'ALFA ÇELİK A.Ş.', 'KDV': 10, 'YMM': 'YMM ALFA'},
+        {'SR': 2, 'FİRMA': 'BETA PROFİL LTD. ŞTİ.', 'KDV': 9, 'BELGE ID': '01a0f2000000abcd'},
+        {'SR': 3, 'FİRMA': 'DELTA BAĞLANTI', 'KDV': 8, 'AÇIKLAMA': 'SİSTEMDEN GÖNDERİLECEK'},
+        {'SR': 4, 'FİRMA': 'EPSİLON YALITIM', 'KDV': 7, 'AÇIKLAMA': 'FİRMA TUTANAK',
+         'TELEFONU': '0 212 000 00 00'},
     ])
     k = exay.takip_dosyasi_oku(str(yol))
     assert [x['TÜR'] for x in k] == ['YMM', 'EXCEL', 'EXCEL', 'KİT']   # toplam satırı yok
-    assert k[3]['TELEFONU'] == '0 212 611 99 00' and k[0]['FİRMA'] == 'ATAKAŞ ÇELİK A.Ş.'
+    assert k[3]['TELEFONU'] == '0 212 000 00 00' and k[0]['FİRMA'] == 'ALFA ÇELİK A.Ş.'
 
 
 @pytest.mark.parametrize("girdi, beklenen", [
@@ -2275,11 +2275,11 @@ def test_tur_normalize(girdi, beklenen):
 
 def test_unvan_eslesme_kirpilmis_ve_bicim_farki():
     a = exay._unvan_anahtari
-    assert a("YILDIZ DEMİR ÇELİK  SAN. A.Ş.") == a("YILDIZ DEMİR ÇELİK SANAYİ A.Ş")
-    assert exay._unvan_eslesir(a("KUTAY IŞIL İNŞAAT DEK. EML. HRF. OTOM. İTH. İHR. S"),
-                               a("KUTAY IŞIL İNŞAAT DEK. EML. HRF. OTOM. İTH. İHR. SAN. TİC. A.Ş."))
-    assert not exay._unvan_eslesir(a("EVYAPAN DEMİR SAN.VE TİC.LTD.ŞTİ."),
-                                   a("EVYAPAN PETROL ÜR. DAĞ. PAZ. İNŞAAT SAN. VE TİC."))
+    assert a("ZETA DEMİR ÇELİK  SAN. A.Ş.") == a("ZETA DEMİR ÇELİK SANAYİ A.Ş")
+    assert exay._unvan_eslesir(a("KAPPA LAMDA İNŞAAT DEK. EML. HRF. OTOM. İTH. İHR. S"),
+                               a("KAPPA LAMDA İNŞAAT DEK. EML. HRF. OTOM. İTH. İHR. SAN. TİC. A.Ş."))
+    assert not exay._unvan_eslesir(a("THETA DEMİR SAN.VE TİC.LTD.ŞTİ."),
+                                   a("THETA PETROL ÜR. DAĞ. PAZ. İNŞAAT SAN. VE TİC."))
     assert not exay._unvan_eslesir(a("ABC A.Ş."), a("ABC DEF GHİ A.Ş."))   # kısa önek yetmez
 
 
@@ -2328,7 +2328,7 @@ def _takipli_ortam(tmp_path):
     ], columns=kols).to_excel(liste, index=False)
     _eski_takip_yaz(kok / "03 MART" / "01 FİRMA VE MUH. BİLGİLERİ MART 2026.xlsx", [
         {'SR': 1, 'FİRMA': 'FIRMA B LTD. ŞTİ.', 'BELGE ID': '01a0f2', 'SMMM': 'AHMET YILMAZ'},
-        {'SR': 2, 'FİRMA': 'FIRMA A', 'YMM': 'HALUK ERDEM', 'AÇIKLAMA': 'a@b.com',
+        {'SR': 2, 'FİRMA': 'FIRMA A', 'YMM': 'YMM BETA', 'AÇIKLAMA': 'a@b.com',
          'DURUM': "30.03.2026'DA KARGOYA VERİLDİ."},
         {'SR': 3, 'FİRMA': 'FIRMA C', 'TELEFONU': '0 342 000 00 00'},
     ])
@@ -2361,7 +2361,7 @@ def test_firmaya_gore_her_firmaya_yalniz_kendi_belgesi(tmp_path):
     assert sat["FIRMA B"]['SR'] == 1 and sat["FIRMA B"]['TÜR'] == 'EXCEL'
     assert sat["FIRMA B"]['SMMM'] == 'AHMET YILMAZ' and sat["FIRMA B"]['VKN'] == '1000000002'
     assert not sat["FIRMA B"]['BELGE ID']
-    assert sat["FIRMA A"]['TÜR'] == 'YMM' and sat["FIRMA A"]['YMM'] == 'HALUK ERDEM'
+    assert sat["FIRMA A"]['TÜR'] == 'YMM' and sat["FIRMA A"]['YMM'] == 'YMM BETA'
     assert sat["FIRMA A"]['AÇIKLAMA'] == 'a@b.com' and not sat["FIRMA A"]['DURUM']
     assert sat["FIRMA C"]['TÜR'] == 'KİT' and sat["FIRMA C"]['TELEFONU'] == '0 342 000 00 00'
     assert sat["FIRMA B"]['KDV'] == pytest.approx(108000)           # 54.000 × 2
@@ -2398,7 +2398,7 @@ def test_firmaya_gore_bos_kit_sablonu_kullanilir(tmp_path):
 def test_takip_dosyasi_yeni_firma_sari_ve_tur_listesi(tmp_path):
     satirlar = [{'SR': 1, 'FİRMA': 'X', 'VKN': '0012345678', 'KDV': 5.5, 'TÜR': 'EXCEL',
                  'yeni': True},
-                {'SR': '', 'FİRMA': 'RHEINZINK', 'KDV': 2, 'TÜR': 'İTHALAT'}]
+                {'SR': '', 'FİRMA': 'YABANCI GMBH', 'KDV': 2, 'TÜR': 'İTHALAT'}]
     yol = exay.firma_takip_dosyasi_yaz(str(tmp_path / exay.takip_dosyasi_adi("08.2026")),
                                        satirlar, "08.2026")
     assert Path(yol).name == "01 FİRMA VE MUH. BİLGİLERİ AĞUSTOS 2026.xlsx"

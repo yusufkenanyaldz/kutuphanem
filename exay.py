@@ -624,7 +624,7 @@ def mukerrer_fatura_bul(df):
         return []
     say = {}
     for v, f in zip(df[vkn_col], df[fno_col]):
-        vs = _vkn_std(v)              # filtrelemeyle aynı VKN (71419747 = 0071419747)
+        vs = _vkn_std(v)              # filtrelemeyle aynı VKN (71234560 = 0071234560)
         fs = str(f).strip()
         if vs.lower() in ('', 'nan', 'none', 'nat') or fs.lower() in ('', 'nan', 'none', 'nat'):
             continue
@@ -821,7 +821,7 @@ def firmalari_filtrele(df, esik_tek, esik_toplam, yuzde80, log_cb):
     # Kaç VKN düzeltildi bilgisini logla
     duzeltilen = (df[vkn_col].apply(lambda x: len(str(x).strip().replace('.0','').replace(' ',''))).isin([8,9]) & mask_gecerli).sum()
     if duzeltilen > 0:
-        log_cb(f"  🔧 {duzeltilen} satırda önde sıfır eksikti, otomatik tamamlandı (ör: 71419747 → 0071419747)", "warn")
+        log_cb(f"  🔧 {duzeltilen} satırda önde sıfır eksikti, otomatik tamamlandı (ör: 71234560 → 0071234560)", "warn")
     # Sağlam ayrıştırıcı: "1.234.567,89" gibi binlik ayraçlı tutarlar 0 olmasın
     df_t['_tutar'] = (df_t[tutar_col].apply(lambda v: para_deger(v) or 0.0)
                       if tutar_col else 0.0)
@@ -1261,7 +1261,7 @@ def docx_destekli():
 
 def _vkn_metinden_ayikla(s):
     """Bir metin parçasından geçerli VKN/TCKN (10-11 hane) çıkarır; yoksa None.
-    Aradaki boşlukları temizler (ör. '493 061 9102' → '4930619102'), 8-9 haneyi
+    Aradaki boşlukları temizler (ör. '493 061 9102' → '1000000044'), 8-9 haneyi
     önde sıfırla tamamlar; yer tutucu (tek-rakam) kimlikleri geçersiz sayar.
     firmalari_filtrele'deki normalize ile aynı kuralı kullanır ki VKN'ler eşleşsin."""
     en_iyi = None
@@ -1276,7 +1276,7 @@ def _vkn_metinden_ayikla(s):
 def _blok_vkn(blok):
     """Karşı firma bloğundan VKN/TCKN ayıklar. Şablonlar arasında etiket/hücre
     düzeni değiştiğinden birkaç strateji sırayla denenir; telefonla karışmaz."""
-    # 1) Etiketin HEMEN yanındaki numara — aynı hücrede 'V.D. – 6120050961' gibi.
+    # 1) Etiketin HEMEN yanındaki numara — aynı hücrede 'V.D. – 1000000046' gibi.
     for m in re.finditer(
             r'(?:[Vv]\.?\s*[Dd]\.?|[Vv]ergi\s*[Dd]airesi|[Kk]urumlar)'
             r'\s*[–\-/:.]*\s*([0-9][0-9 ]{7,14}[0-9])', blok):
@@ -1605,7 +1605,7 @@ def _fatura_kaynak_kolonlari(kolonlar):
 def _tarihe_gore_sirala(firma_df, cols):
     """Word tutanağı/YMM yazısı için faturaları TARİH sırasına dizer (elle hazırlanan
     tutanaklardaki gibi). Kaynak liste tutara göre sıralı gelse bile (gerçek vaka:
-    OPUROĞLU GOLD 08-2026) tablo nizami olsun. Sıralama KARARLIDIR: aynı tarihli
+    gerçek bir KİT, Ağustos 2026) tablo nizami olsun. Sıralama KARARLIDIR: aynı tarihli
     faturalar listedeki sırasını korur; tarihi okunamayanlar sona gider.
     Excel tutanağının sırası değişmez (yalnızca Word çıktısında kullanılır)."""
     tc = cols.get('tarih')
