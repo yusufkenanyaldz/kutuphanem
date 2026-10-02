@@ -1491,6 +1491,26 @@ def _fatura_kaynak_kolonlari(kolonlar):
         'kdv':    kdv_sutunu_bul(kolonlar) or sutun_bul(kolonlar, ARA_KDVYEDEK),
     }
 
+def _tarihe_gore_sirala(firma_df, cols):
+    """Word tutanağı/YMM yazısı için faturaları TARİH sırasına dizer (elle hazırlanan
+    tutanaklardaki gibi). Kaynak liste tutara göre sıralı gelse bile (gerçek vaka:
+    OPUROĞLU GOLD 08-2026) tablo nizami olsun. Sıralama KARARLIDIR: aynı tarihli
+    faturalar listedeki sırasını korur; tarihi okunamayanlar sona gider.
+    Excel tutanağının sırası değişmez (yalnızca Word çıktısında kullanılır)."""
+    tc = cols.get('tarih')
+    if not tc or len(firma_df) < 2:
+        return firma_df
+    def _coz(v):
+        if isinstance(v, datetime):
+            return v
+        if v is None or (not isinstance(v, str) and pd.isna(v)):
+            return None
+        return _tarih_coz(str(v))
+    tarihler = [_coz(v) for v in firma_df[tc]]
+    sira = sorted(range(len(tarihler)),
+                  key=lambda i: (tarihler[i] is None, tarihler[i] or 0, i))
+    return firma_df.iloc[sira]
+
 def _fatura_satir_degerleri(row, cols, son_dahil=False):
     """Bir fatura satırını sabit sütun sırasına çevirir:
     [Tarih, No, Cins, Miktar, Matrah, KDV, son]. `son` = son_dahil ise matrah+kdv
@@ -1658,7 +1678,7 @@ def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
                 break
 
         satirlar = [_fatura_satir_degerleri(row, cols, son_dahil)
-                    for _, row in firma_df.iterrows()]
+                    for _, row in _tarihe_gore_sirala(firma_df, cols).iterrows()]
         if proto_var and not satirlar:
             try:
                 hedef_tablo.Rows(veri_bas).Delete()   # yazılacak fatura yok → örnek de gitsin
@@ -1959,7 +1979,7 @@ def _docx_fatura_doldur(doc, firma_df, tum_kolonlar, inceleme_dayanagi=None, log
         hedef._tbl.remove(row._tr)
 
     yazilan = 0
-    for _, r in firma_df.iterrows():
+    for _, r in _tarihe_gore_sirala(firma_df, cols).iterrows():
         hucreler = _fatura_satir_degerleri(r, cols, son_dahil)
         if proto_tr is not None:
             hedef._tbl.append(deepcopy(proto_tr))

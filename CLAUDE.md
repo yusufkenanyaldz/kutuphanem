@@ -222,7 +222,7 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 yöntemini otomatikleştirir). Çalıştırma:
 
 ```bash
-pytest -q        # 141 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
+pytest -q        # 144 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
                  # VKN normalizasyon, üç liste tipi (yeni/eski GİB + muhasebe),
                  # CSV okuma, kriter doğrulama, doğruluk uyarıları (kdv/mükerrer/
                  # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca,
@@ -276,7 +276,7 @@ kullanıcının elle hazırladığıyla birebir aynı çıktı. Gerçek müşter
 - Geçersiz kimlikli satırlar tutanaklanamaz; kullanıcı kaynak listede
   düzeltirse kapsam iyileşir (program uyarıyor).
 - ~~GUI'de ilerleme çubuğu yok~~ → **eklendi** (firma sayısına göre dolar).
-- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 141 test).
+- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 144 test).
 - ~~İşlem öncesi önizleme/uyarı yok~~ → **eklendi** (ÖN BİLGİ bloğu + KDV
   tutarlılık, mükerrer fatura, dönem-dışı tarih uyarıları — hepsi yalnızca
   uyarır, seçimi/iş kuralını etkilemez).
@@ -369,3 +369,9 @@ kullanıcının elle hazırladığıyla birebir aynı çıktı. Gerçek müşter
   veri satırına `Range.Font.Bold = False` uygulanır; `.docx` yolunda da veri
   satırı run'ları `bold=False`. COM yolu artık testte **sahte Word nesne
   modeliyle** (`_SahteTablo`: `Rows.Add()` son satırın biçimini kopyalar) sınanır.
+- **Word'de faturalar TARİH sırasıyla** dizilir (`_tarihe_gore_sirala`; hem `.docx`
+  hem COM yolu): kaynak liste tutara göre sıralı gelse bile (gerçek vaka: OPUROĞLU
+  GOLD 08-2026) tablo elle hazırlananlar gibi nizami olur. Sıralama KARARLIDIR (aynı
+  tarihli faturalar listedeki sırasını korur — böylece Ağustos 2026'nın 13 YMM
+  yazısı ve BARSA tutanağı elle hazırlananlarla hâlâ birebir aynı); tarihi
+  okunamayan sona gider. **Excel tutanağının sırası değişmez** (liste sırası).

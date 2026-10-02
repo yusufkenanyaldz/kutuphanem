@@ -1881,3 +1881,46 @@ def test_docx_fatura_satirlari_kalin_degil(tmp_path):
     t2 = docx.Document(out).tables[-1]
     runs = [r for row in t2.rows[2:] for c in row.cells for p in c.paragraphs for r in p.runs if r.text]
     assert runs and not any(r.bold for r in runs)
+
+
+def _karisik_sirali_faturalar():
+    """Liste tutara göre sıralı gelmiş (gerçek vaka: OPUROĞLU GOLD 08-2026)."""
+    kols = ["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su", "Alınan Mal ve/veya Hizmetin Cinsi",
+            "Alınan Mal ve/veya Hizmetin Miktarı", "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı", "KDV'si"]
+    df = pd.DataFrame([["18.08.2026", "CGT610", "JÜT", "1 KG", 225004.6, 22500.46],
+                       ["05.08.2026", "CGT575", "JÜT", "1 KG", 211121.0, 21112.1],
+                       ["okunamayan", "CGT999", "JÜT", "1 KG", 200000.0, 20000.0],
+                       ["18.08.2026", "CGT609", "JÜT", "1 KG", 88572.0, 8857.2],     # aynı tarih: liste sırası
+                       [exay.datetime(2026, 8, 3), "CGT565", "JÜT", "1 KG", 198573.3, 19857.33]],
+                      columns=kols)
+    return df, kols
+
+_BEKLENEN_SIRA = ["CGT565", "CGT575", "CGT610", "CGT609", "CGT999"]
+
+
+def test_word_faturalar_tarih_sirasinda_docx(tmp_path):
+    import docx
+    yol = tmp_path / "s.docx"
+    _docx_sablon_yaz(yol, "ÖRNEK A.Ş.", "KADIKÖY / 1234567890")
+    df, kols = _karisik_sirali_faturalar()
+    out = tmp_path / "o.docx"
+    exay.firma_docx_olustur(str(yol), df, str(out), kols)
+    t = docx.Document(out).tables[-1]
+    assert [r.cells[1].text for r in t.rows[2:]] == _BEKLENEN_SIRA
+
+
+def test_word_faturalar_tarih_sirasinda_com(tmp_path, monkeypatch):
+    tablo = _SahteTablo(list(_KIT_BASLIK))
+    _sahte_word_kur(monkeypatch, tablo)
+    df, kols = _karisik_sirali_faturalar()
+    exay.firma_word_olustur(str(tmp_path / "s.doc"), df, str(tmp_path / "o.doc"), kols)
+    assert [s._h[1].metin for s in tablo.satirlar[2:]] == _BEKLENEN_SIRA
+
+
+def test_excel_tutanak_sirasi_degismez(tmp_path):
+    """Sıralama yalnız Word içindir; GİB'e yüklenen Excel listedeki sırayı korur."""
+    df, kols = _karisik_sirali_faturalar()
+    out = tmp_path / "e.xlsx"
+    exay.firma_excel_olustur(df, str(out), kols)
+    ws = openpyxl.load_workbook(out).active
+    assert [ws.cell(r, 3).value for r in range(2, 7)] == list(df[kols[1]])
