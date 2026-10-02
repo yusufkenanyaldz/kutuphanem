@@ -2420,3 +2420,9 @@ def test_takip_aramasi_cikti_disi_klasorleri_atlar(tmp_path):
     (tmp_path / "a" / "~$FİRMA BİLGİLERİ.xlsx").write_bytes(b"kilit")
     bulunan = exay.takip_dosyalarini_bul([tmp_path])
     assert [p.relative_to(tmp_path).as_posix() for p in bulunan] == ["a/FİRMA BİLGİLERİ.xlsx"]
+
+
+def test_oz_test_exe_icin(tmp_path):
+    """.exe derlemesinden sonra CI'da çalışan öz-test kaynakta da geçmeli."""
+    assert exay._oz_test(str(tmp_path / "oz")) == 0, (tmp_path / "oz" / "OZ_TEST_HATA.txt").read_text()
+    assert (tmp_path / "oz" / "OZ_TEST_TAMAM.txt").read_text(encoding='utf-8').startswith("TAMAM")

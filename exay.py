@@ -4401,7 +4401,81 @@ class KDVBolmeApp:
         self.birak_yazi.config(text=yazi, fg=renk)
 
 # ══════════════════════════════════════════
+def _oz_test(klasor):
+    """Paketlenmiş .exe'nin bağımlılıklarını (pandas/openpyxl/python-docx/docxcompose
+    ve veri dosyaları) uçtan uca dener: sentetik liste + KİT şablonu + devam sayfası +
+    takip dosyasıyla 'Firmaya göre' çalıştırır. GitHub Actions derlemeden sonra
+    `KarsitInceleme.exe --oz-test <klasör>` ile çağırır. Sonuç klasöre yazılır
+    (OZ_TEST_TAMAM.txt / OZ_TEST_HATA.txt); pencereli .exe'de konsol yoktur."""
+    import traceback
+    k = Path(klasor)
+    k.mkdir(parents=True, exist_ok=True)
+    try:
+        import docx
+        from docx.enum.section import WD_ORIENT
+        kols = ["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su",
+                "Alış Faturasının KDV Hariç Tutarı", "KDV si",
+                "Satıcının Adı-Soyadı / Ünvanı", "Satıcının Vergi Kimlik Numarası"]
+        liste = k / "NISAN_2026.xlsx"
+        pd.DataFrame([("2026-04-01", "F1", 200000, 40000, "FIRMA A", "1000000001"),
+                      ("2026-04-02", "F2", 600000, 120000, "FIRMA B", "1000000002")],
+                     columns=kols).to_excel(liste, index=False)
+        sk = k / "sablonlar"
+        sk.mkdir(exist_ok=True)
+        d = docx.Document()
+        t = d.add_table(rows=0, cols=2)
+        for a, b in [("NEZDİNDE KARŞIT İNCELEME YAPILAN FİRMANIN", ""),
+                     ("Ünvanı", "FIRMA A"), ("Vergi Dairesi/Nosu", "V.D. 1000000001")]:
+            r = t.add_row().cells; r[0].text = a; r[1].text = b
+        f = d.add_table(rows=2, cols=7)
+        for c, v in enumerate(["FATURANIN", "FATURANIN", "MALIN", "MALIN", "MALIN",
+                               "MALIN", "Defter Kayıt"]):
+            f.rows[0].cells[c].text = v
+        for c, v in enumerate(["Tarihi", "Numarası", "Cinsi", "Miktarı", "Tutarı",
+                               "KDV Tutarı", "Tarihi/Nosu"]):
+            f.rows[1].cells[c].text = v
+        d.save(str(sk / "a.docx"))
+        dv = docx.Document()
+        sec = dv.sections[0]
+        sec.orientation = WD_ORIENT.LANDSCAPE
+        sec.page_width, sec.page_height = sec.page_height, sec.page_width
+        dt = dv.add_table(rows=1, cols=3)
+        for c, v in enumerate(["KDV BEYANNAMESİ BİLGİLERİ", "TEMMUZ / 2026", "AĞUSTOS / 2026"]):
+            dt.rows[0].cells[c].text = v
+        dv.save(str(k / "devam.docx"))
+        wb = openpyxl.Workbook(); ws = wb.active
+        ws.append(["SR", "FİRMA", "KDV", "BELGE ID", "AÇIKLAMA", "SMMM", "YMM"])
+        ws.append([1, "FIRMA B", 120000, "01a0f2", "", "AHMET", ""])
+        ws.append([2, "FIRMA A", 40000, "", "", "", ""])
+        wb.save(str(k / "01 FİRMA VE MUH. BİLGİLERİ MART 2026.xlsx"))
+        gunluk = []
+        dosyalari_isle(str(liste), 150000, 450000, 80,
+                       lambda m, t='': gunluk.append(str(m)), lambda *a: None,
+                       sablon_klasor=str(sk), cikti_turu='firmaya_gore',
+                       devam_sablon=str(k / "devam.docx"))
+        cikti = k / "Hazır Tutanaklar"
+        kit = [p for p in cikti.glob("*.docx") if "FIRMA A" in p.name]
+        assert kit, "KİT üretilmedi"
+        assert len(docx.Document(str(kit[0])).sections) == 2, "devam sayfası eklenmedi"
+        assert [p for p in cikti.glob("*.xlsx") if "FIRMA B" in p.name], "Excel üretilmedi"
+        assert (cikti / takip_dosyasi_adi("04.2026")).exists(), "takip dosyası yok"
+        try:
+            import docxcompose  # noqa: F401
+            dc = "var"
+        except Exception:
+            dc = "YOK"
+        (k / "OZ_TEST_TAMAM.txt").write_text(
+            f"TAMAM — sürüm {SURUM}, docxcompose {dc}\n" + "\n".join(gunluk),
+            encoding='utf-8')
+        return 0
+    except Exception:
+        (k / "OZ_TEST_HATA.txt").write_text(traceback.format_exc(), encoding='utf-8')
+        return 1
+
+
 if __name__ == '__main__':
+    if len(sys.argv) > 2 and sys.argv[1] == '--oz-test':
+        sys.exit(_oz_test(sys.argv[2]))
     try:
         import tkinterdnd2; root = tkinterdnd2.Tk()
     except: root = tk.Tk()

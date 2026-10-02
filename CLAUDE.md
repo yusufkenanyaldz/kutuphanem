@@ -229,6 +229,10 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
   konumlarda sorun çıkmasın diye).
 - Sürüm sabiti: `SURUM` (GUI başlığında ve özet/günlükte gösterilir).
 - Geliştirme: `python exay.py` (GUI açılır).
+- **GitHub Actions (`.github/workflows/exe.yml`)**: her push'ta Windows'ta testler +
+  PyInstaller `.exe` + **öz-test**: `KarsitInceleme.exe --oz-test <klasör>` (`_oz_test`)
+  paketlenmiş hâliyle sentetik liste/şablon/devam/takip ile "Firmaya göre" çalıştırır
+  (eksik paket verisi derlemede yakalansın). main'de exe "son-surum" yayınına yüklenir.
 - `.exe` derleme: `derle.bat` (PyInstaller `--onefile --windowed`, logoyu
   `logo.ico` olarak gömer). Klasörde `exay.py` + `derle.bat` + `logo.ico`
   yan yana olmalı. Çıktı: `dist/KarsitInceleme.exe`.
@@ -243,7 +247,7 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 yöntemini otomatikleştirir). Çalıştırma:
 
 ```bash
-pytest -q        # 180 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
+pytest -q        # 181 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
                  # VKN normalizasyon, üç liste tipi (yeni/eski GİB + muhasebe),
                  # CSV okuma, kriter doğrulama, doğruluk uyarıları (kdv/mükerrer/
                  # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca,
@@ -298,7 +302,7 @@ kullanıcının elle hazırladığıyla birebir aynı çıktı. Gerçek müşter
 - Geçersiz kimlikli satırlar tutanaklanamaz; kullanıcı kaynak listede
   düzeltirse kapsam iyileşir (program uyarıyor).
 - ~~GUI'de ilerleme çubuğu yok~~ → **eklendi** (firma sayısına göre dolar).
-- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 180 test).
+- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 181 test).
 - ~~İşlem öncesi önizleme/uyarı yok~~ → **eklendi** (ÖN BİLGİ bloğu + KDV
   tutarlılık, mükerrer fatura, dönem-dışı tarih uyarıları — hepsi yalnızca
   uyarır, seçimi/iş kuralını etkilemez).
