@@ -1,0 +1,59 @@
+# Windows .exe derlemesi — Python kurulu olmayan bilgisayarlar için.
+# Her push'ta testler çalışır ve KarsitInceleme.exe derlenir (Actions → çalışma →
+# "Artifacts"). main dalına push'ta ayrıca "Son sürüm" (son-surum) yayınına
+# yüklenir: GitHub depo sayfası → Releases → KarsitInceleme.exe.
+name: Windows .exe
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Bağımlılıklar
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller tkinterdnd2
+
+      - name: Testler
+        env:
+          EXAY_TK_STUB: '1'   # testlerde gerçek pencere açılmasın (conftest.py)
+        run: python -m pytest -q
+
+      - name: .exe derle
+        shell: bash
+        run: |
+          IKON=()
+          if [ -f logo.ico ]; then IKON=(--icon logo.ico --add-data "logo.ico;."); fi
+          pyinstaller --noconfirm --onefile --windowed --name KarsitInceleme "${IKON[@]}" \
+            --collect-data docx --collect-all tkinterdnd2 \
+            --hidden-import win32com.client exay.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KarsitInceleme
+          path: dist/KarsitInceleme.exe
+
+      - name: Son sürümü yayınla (yalnız main)
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SURUM=$(grep -m1 '^SURUM' exay.py | cut -d'"' -f2)
+          gh release delete son-surum --yes --cleanup-tag 2>/dev/null || true
+          gh release create son-surum dist/KarsitInceleme.exe \
+            --target "$GITHUB_SHA" --title "Karşıt İnceleme Asistanı v$SURUM" \
+            --notes "Python gerektirmez: KarsitInceleme.exe dosyasını indirip çalıştırın. (Sürüm $SURUM, ${GITHUB_SHA::7})"

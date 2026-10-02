@@ -13,11 +13,13 @@ from unittest.mock import MagicMock
 
 
 def _tkinter_stub_kur():
-    try:
-        import tkinter  # noqa: F401  (gerçek tkinter varsa stub'a gerek yok)
-        return
-    except Exception:
-        pass
+    import os
+    if not os.environ.get('EXAY_TK_STUB'):   # CI (GitHub Actions) stub'ı zorlar
+        try:
+            import tkinter  # noqa: F401  (gerçek tkinter varsa stub'a gerek yok)
+            return
+        except Exception:
+            pass
 
     # tkinter'ı MagicMock ile taklit et: her widget/çağrı çocuk MagicMock döndürür.
     # Böylece iş mantığı test edilebildiği gibi, KDVBolmeApp gerçek bir ekran
