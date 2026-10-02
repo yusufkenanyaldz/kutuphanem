@@ -371,6 +371,12 @@ kullanıcının elle hazırladığıyla birebir aynı çıktı. Gerçek müşter
   şablonu bir kez seçilir; her KİT'in arkasına ayrı (yatay) bölüm olarak, ay
   başlıkları döneme göre güncellenerek eklenir. YMM yazısına eklenmez. Gerçek
   dosyalarla (BARSA KİT + devam) LibreOffice'te 3 sayfa (1 dikey + 2 yatay) doğrulandı.
+- **KİT Word 2027'de kalkıyor (kullanıcı bilgisi, Ekim 2026):** yalnız Excel tutanak +
+  YMM yazısı kalacak. Kuralın çıktı tarihine mi liste dönemine mi göre işleyeceği
+  HENÜZ BELLİ DEĞİL → kod DEĞİŞTİRİLMEDİ; o zamana kadar kullanıcı takip dosyasında
+  TÜR'ü elle EXCEL yapar. Kesinleşince yapılacak: `dosyalari_isle`'de `turler`
+  hesaplanırken TÜR=KİT → EXCEL (günlüğe not) ve `_tur_cikar` varsayılanı EXCEL;
+  KİT devam sayfası / boş KİT şablonu seçenekleri kullanılmaz hâle gelir.
 - **YMM yazısı tarihi:** 'Konu: Bilgi İsteme' satırındaki tarih çıktının alındığı
   gün olur; Sayı'yı kullanıcı giden evrak defterinden yazar.
 - **Word'leri tek dosyada birleştir (`word_tek_dosya`):** opsiyonel; üretilen
