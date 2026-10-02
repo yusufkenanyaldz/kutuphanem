@@ -1644,17 +1644,29 @@ def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
         except Exception:
             pass
 
-        # Mevcut veri satırlarını sil (baştaki başlık satırları korunur)
-        while hedef_tablo.Rows.Count >= veri_bas:
+        # Veri satırlarını temizle: İLK veri satırı ÖRNEK (prototip) olarak kalır,
+        # gerisi silinir. Eskiden hepsi siliniyordu; Rows.Add() de son kalan BAŞLIK
+        # satırının biçimini kopyaladığından fatura bilgileri KALIN çıkıyordu
+        # (başlığı kalın olmayan şablonda çıkmıyordu → "değişken" görünüyordu).
+        # Şimdi yeni satırlar şablonun kendi veri satırının biçimini alır.
+        proto_var = hedef_tablo.Rows.Count >= veri_bas
+        kalacak = veri_bas if proto_var else veri_bas - 1
+        while hedef_tablo.Rows.Count > kalacak:
             try:
                 hedef_tablo.Rows(hedef_tablo.Rows.Count).Delete()
             except Exception:
                 break
 
+        satirlar = [_fatura_satir_degerleri(row, cols, son_dahil)
+                    for _, row in firma_df.iterrows()]
+        if proto_var and not satirlar:
+            try:
+                hedef_tablo.Rows(veri_bas).Delete()   # yazılacak fatura yok → örnek de gitsin
+            except Exception:
+                pass
         yazilan = 0
-        for _, row in firma_df.iterrows():
-            hucreler = _fatura_satir_degerleri(row, cols, son_dahil)
-            yeni = hedef_tablo.Rows.Add()
+        for i, hucreler in enumerate(satirlar):
+            yeni = hedef_tablo.Rows(veri_bas) if (i == 0 and proto_var) else hedef_tablo.Rows.Add()
             try:
                 cells = yeni.Cells
                 n = cells.Count
@@ -1668,6 +1680,11 @@ def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
                     (cells(ci) if cells else yeni.Cells(ci)).Range.Text = deger
                 except Exception:
                     pass
+            # Fatura bilgisi hiçbir zaman kalın yazılmaz (elle hazırlanan tutanaklar gibi).
+            try:
+                yeni.Range.Font.Bold = False
+            except Exception:
+                pass
             yazilan += 1
 
         # İnceleme Dayanağı (sözleşme) verildiyse etiketin yanındaki hücreyi güncelle
@@ -1952,6 +1969,9 @@ def _docx_fatura_doldur(doc, firma_df, tum_kolonlar, inceleme_dayanagi=None, log
         # TÜM hücreleri yaz; fazladan sütun proto satırın örnek verisini taşımasın.
         for ci, cell in enumerate(satir.cells):
             _docx_hucre_yaz(cell, hucreler[ci] if ci < len(hucreler) else '')
+            for p in cell.paragraphs:          # fatura bilgisi asla kalın değil
+                for run in p.runs:
+                    run.bold = False
         yazilan += 1
 
     if inceleme_dayanagi:

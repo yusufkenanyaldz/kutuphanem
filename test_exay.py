@@ -1760,3 +1760,124 @@ def test_birlesik_doc_word_yoksa_net_mesaj(tmp_path, monkeypatch):
     exay.sablonlari_indeksle(str(tmp_path), lambda m, t='': loglar.append(m))
     metin = "\n".join(loglar)
     assert "Word kurulu olmalı" in metin and "bozuk" not in metin
+
+
+# ── Sahte Word (COM) — .doc yolu bu ortamda Word olmadan test edilebilsin ──
+class _SahteFont:
+    def __init__(self, hucreler): self._h = hucreler
+    @property
+    def Bold(self): return all(h.kalin for h in self._h)
+    @Bold.setter
+    def Bold(self, v):
+        for h in self._h: h.kalin = bool(v)
+
+class _SahteAralik:
+    def __init__(self, hucreler): self._h = hucreler
+    @property
+    def Text(self): return self._h[0].metin
+    @Text.setter
+    def Text(self, v): self._h[0].metin = v
+    @property
+    def Font(self): return _SahteFont(self._h)
+
+class _SahteHucre:
+    def __init__(self, metin, kalin): self.metin, self.kalin = metin, kalin
+    @property
+    def Range(self): return _SahteAralik([self])
+
+class _SahteHucreler(list):
+    @property
+    def Count(self): return len(self)
+    def __call__(self, i): return self[i - 1]
+
+class _SahteSatir:
+    def __init__(self, tablo, metinler, kalin):
+        self._t = tablo; self._h = [_SahteHucre(m, kalin) for m in metinler]
+    @property
+    def Cells(self): return _SahteHucreler(self._h)
+    @property
+    def Range(self):
+        a = _SahteAralik(self._h); return a
+    def Delete(self): self._t.satirlar.remove(self)
+
+class _SahteSatirlar:
+    def __init__(self, tablo): self._t = tablo
+    @property
+    def Count(self): return len(self._t.satirlar)
+    def __call__(self, i): return self._t.satirlar[i - 1]
+    def Add(self):
+        # Gerçek Word gibi: yeni satır SON satırın biçimini (kalınlık) kopyalar
+        son = self._t.satirlar[-1]
+        yeni = _SahteSatir(self._t, [''] * len(son._h), son._h[0].kalin)
+        self._t.satirlar.append(yeni); return yeni
+
+class _SahteTablo:
+    def __init__(self, satirlar):
+        self.satirlar = []
+        for metinler, kalin in satirlar:
+            self.satirlar.append(_SahteSatir(self, metinler, kalin))
+    @property
+    def Rows(self): return _SahteSatirlar(self)
+
+def _sahte_word_kur(monkeypatch, tablo):
+    import sys, types
+    from unittest.mock import MagicMock
+    belge = MagicMock(); belge.Tables = [tablo]
+    word = MagicMock(); word.Documents.Open.return_value = belge
+    paket = types.ModuleType("win32com"); istemci = types.ModuleType("win32com.client")
+    istemci.DispatchEx = lambda ad: word; istemci.constants = MagicMock()
+    paket.client = istemci
+    monkeypatch.setitem(sys.modules, "win32com", paket)
+    monkeypatch.setitem(sys.modules, "win32com.client", istemci)
+    return belge
+
+_KIT_BASLIK = [(["FATURANIN", "FATURANIN", "MALIN", "MALIN", "MALIN", "MALIN", "Defter Kayıt"], True),
+               (["Tarihi", "Numarası", "Cinsi", "Miktarı", "Tutarı", "KDV Tutarı", "Tarihi/Nosu"], True)]
+
+def _uc_fatura():
+    kols = ["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su", "Alınan Mal ve/veya Hizmetin Cinsi",
+            "Alınan Mal ve/veya Hizmetin Miktarı", "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı", "KDV'si"]
+    df = pd.DataFrame([["2026-08-03", "CGT1", "JÜT İPLİK", "3255,30 Kg", 198573.3, 19857.33],
+                       ["2026-08-05", "CGT2", "JÜT İPLİK", "3461 Kg", 211121.0, 21112.1],
+                       ["2026-08-08", "CGT3", "JÜT İPLİK", "3425,80 Kg", 208973.8, 20897.38]], columns=kols)
+    return df, kols
+
+
+@pytest.mark.parametrize("ornek_satir", [True, False])
+def test_word_com_fatura_satirlari_kalin_degil(tmp_path, monkeypatch, ornek_satir):
+    """GERÇEK HATA (OPUROĞLU GOLD 08-2026.doc): COM yolu tüm veri satırlarını silip
+    Rows.Add() ile ekliyordu; Word yeni satıra son kalan KALIN başlık satırının
+    biçimini kopyaladığından fatura bilgileri kalın çıkıyordu. Elle hazırlanan
+    tutanaklarda fatura satırı hiçbir zaman kalın değildir."""
+    satirlar = list(_KIT_BASLIK)
+    if ornek_satir:   # şablonda eski firmanın verisiyle normal (kalın olmayan) bir satır
+        satirlar.append((["31.03.2026", "CEF51", "Bobin İplik", "1 Adet", "2.811.358,00", "562.271,60", ""], False))
+    tablo = _SahteTablo(satirlar)
+    _sahte_word_kur(monkeypatch, tablo)
+    df, kols = _uc_fatura()
+    exay.firma_word_olustur(str(tmp_path / "sablon.doc"), df, str(tmp_path / "cikti.doc"), kols)
+    veri = tablo.satirlar[2:]
+    assert len(veri) == 3                                            # eski veri gitti, 3 fatura
+    assert [s._h[1].metin for s in veri] == ["CGT1", "CGT2", "CGT3"]
+    assert not any(h.kalin for s in veri for h in s._h)              # hiçbiri kalın değil
+    assert all(h.kalin for s in tablo.satirlar[:2] for h in s._h)    # başlıklar kalın kaldı
+    assert "Bobin" not in " ".join(h.metin for s in veri for h in s._h)
+
+
+def test_docx_fatura_satirlari_kalin_degil(tmp_path):
+    """.docx yolu: şablonun örnek veri satırı kalın olsa bile fatura bilgisi
+    kalın yazılmaz; firma bilgileri (başka tablo) biçimini korur."""
+    import docx
+    yol = tmp_path / "s.docx"
+    _docx_sablon_yaz(yol, "ÖRNEK A.Ş.", "KADIKÖY / 1234567890")
+    d = docx.Document(yol)
+    t = d.tables[-1]
+    for c in t.rows[2].cells:                                        # örnek satırı kalın yap
+        c.paragraphs[0].add_run("eski").bold = True
+    d.save(yol)
+    df, kols = _uc_fatura()
+    out = tmp_path / "o.docx"
+    exay.firma_docx_olustur(str(yol), df, str(out), kols)
+    t2 = docx.Document(out).tables[-1]
+    runs = [r for row in t2.rows[2:] for c in row.cells for p in c.paragraphs for r in p.runs if r.text]
+    assert runs and not any(r.bold for r in runs)

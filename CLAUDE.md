@@ -222,7 +222,7 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 yöntemini otomatikleştirir). Çalıştırma:
 
 ```bash
-pytest -q        # 138 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
+pytest -q        # 141 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
                  # VKN normalizasyon, üç liste tipi (yeni/eski GİB + muhasebe),
                  # CSV okuma, kriter doğrulama, doğruluk uyarıları (kdv/mükerrer/
                  # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca,
@@ -276,7 +276,7 @@ kullanıcının elle hazırladığıyla birebir aynı çıktı. Gerçek müşter
 - Geçersiz kimlikli satırlar tutanaklanamaz; kullanıcı kaynak listede
   düzeltirse kapsam iyileşir (program uyarıyor).
 - ~~GUI'de ilerleme çubuğu yok~~ → **eklendi** (firma sayısına göre dolar).
-- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 138 test).
+- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 141 test).
 - ~~İşlem öncesi önizleme/uyarı yok~~ → **eklendi** (ÖN BİLGİ bloğu + KDV
   tutarlılık, mükerrer fatura, dönem-dışı tarih uyarıları — hepsi yalnızca
   uyarır, seçimi/iş kuralını etkilemez).
@@ -360,3 +360,12 @@ kullanıcının elle hazırladığıyla birebir aynı çıktı. Gerçek müşter
   sayısı/başlık satırı sayısına göre ince ayar gerekebilir (`firma_word_olustur`
   loglu yazılmıştır). Miktar sütunu kaynak listeden alınır (`sutun_bul(['miktar'])`);
   liste düzeni netleştikçe eşleme gözden geçirilmeli.
+- **Fatura satırları KALIN yazılmaz** (elle hazırlanan tutanaklarda hiç kalın fatura
+  bilgisi yoktur). Gerçek hata (OPUROĞLU GOLD 08-2026.doc): COM yolu tüm veri
+  satırlarını silip `Rows.Add()` ile ekliyordu; Word yeni satıra son kalan KALIN
+  başlık satırının biçimini kopyaladığı için fatura satırları kalın çıkıyordu
+  (başlığı kalın olmayan şablonda çıkmadığından "değişken" görünüyordu). Şimdi
+  şablonun İLK veri satırı örnek olarak kalır, yeniler onun biçimini alır ve her
+  veri satırına `Range.Font.Bold = False` uygulanır; `.docx` yolunda da veri
+  satırı run'ları `bold=False`. COM yolu artık testte **sahte Word nesne
+  modeliyle** (`_SahteTablo`: `Rows.Add()` son satırın biçimini kopyalar) sınanır.
