@@ -53,6 +53,12 @@ Bir firma (VKN) şu **seçim kurallarıyla** tutanaklanır:
    dosyasının EN ALTINDA **etiketsiz** bir toplam satırı vardır (yalnız tutar
    sütunları dolu). Eski sürüm bunu geçersiz fatura sayıp payda 163 M yerine
    326 M oldu; %80 tutmadı ve 39 yerine 257 firmanın HEPSİNE tutanak üretti.
+   **İthalat istisnası (kullanıcı kararı, Ekim 2026):** "GGB Tescil No'su (Alış
+   İthalat İse)" hücresi DOLU satır ithalattır → %80 hesabına HİÇ girmez (ne
+   seçilir ne paydada kalır), "geçersiz VKN" de sayılmaz (`ithalat_satirlarini_ayir`;
+   `firmalari_filtrele` ve `ozet_rapor_olustur` içinde uygulanır). Ağustos 2026:
+   RHEINZINK (yer tutucu VKN 1111111111, 6,1 M) payda dışı → 157,2 M, 39 firma, %95,8.
+   GGB sütunu olmayan listelerde (eski GİB, muhasebe) hiçbir satır ithalat sayılmaz.
 
 4. Seçilen firmalar dosya isimlerinde **büyükten küçüğe (toplam tutar)**
    sıralanır ve **1'den ardışık** numaralandırılır (atlama olmamalı).
@@ -222,7 +228,7 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 yöntemini otomatikleştirir). Çalıştırma:
 
 ```bash
-pytest -q        # 144 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
+pytest -q        # 146 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
                  # VKN normalizasyon, üç liste tipi (yeni/eski GİB + muhasebe),
                  # CSV okuma, kriter doğrulama, doğruluk uyarıları (kdv/mükerrer/
                  # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca,
@@ -243,7 +249,8 @@ sec, gecersiz = exay.firmalari_filtrele(df, 150000, 450000, 80, lambda *a, **k: 
 Her değişiklikten sonra **üç liste tipini de** (eski GİB, yeni GİB, muhasebe)
 test et. Bilinen gerçek dosyalarda beklenen gerçek kapsamlar:
 Nisan %94.2, Ocak %82.2, Muhasebe %82.4, **Ağustos 2026 (yeni GİB formatı,
-2 sayfalı .xls, etiketsiz toplam satırlı) → 656 fatura, 39 firma, %92.2**.
+2 sayfalı .xls, etiketsiz toplam satırlı) → 656 fatura, 39 firma, %95.8**
+(ithalat istisnasından önce %92.2 idi).
 Bu dosyada program çıktısı kullanıcının Excel tutanaklarıyla ve BARSA Word
 tutanağının fatura tablosuyla birebir aynı çıktı. Aynı ayın **YMM 08.2026.doc**
 birleşik dosyası (14 Bilgi İsteme yazısı, .docx'e çevrilerek) şablon klasörü
@@ -276,7 +283,7 @@ kullanıcının elle hazırladığıyla birebir aynı çıktı. Gerçek müşter
 - Geçersiz kimlikli satırlar tutanaklanamaz; kullanıcı kaynak listede
   düzeltirse kapsam iyileşir (program uyarıyor).
 - ~~GUI'de ilerleme çubuğu yok~~ → **eklendi** (firma sayısına göre dolar).
-- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 144 test).
+- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 146 test).
 - ~~İşlem öncesi önizleme/uyarı yok~~ → **eklendi** (ÖN BİLGİ bloğu + KDV
   tutarlılık, mükerrer fatura, dönem-dışı tarih uyarıları — hepsi yalnızca
   uyarır, seçimi/iş kuralını etkilemez).
@@ -286,10 +293,9 @@ kullanıcının elle hazırladığıyla birebir aynı çıktı. Gerçek müşter
 - ~~Toplu (batch) işleme yok~~ → **eklendi** (çoklu dosya seç / sürükle-bırak).
 - ~~CSV girdi yok~~ → **eklendi** (`.csv`/`.txt`, kodlama+ayraç otomatik).
 - ~~PDF çıktı yok~~ → **eklendi** (opsiyonel, `reportlab` varsa).
-- **Açık iş kuralı sorusu (DEĞİŞTİRİLMEDİ, kullanıcıya danışılacak):** %80 hedefi
-  tutmadığında 2. aşama kalan TÜM firmaları ekler — toplamı 0 ya da negatif
-  (yalnız iade) olan firmalar da dahil; bunlar kapsama katkı yapmaz ama tutanak
-  üretilir.
+- **Negatif tutar / iade faturası:** Kullanıcının listelerinde hiç yoktur (iade
+  faturaları listeye eklenmez). Bu yüzden 2. aşamada sıfır/eksi firma durumu için
+  ek kural gerekmedi (soru kapandı, kural değiştirilmedi).
 - Toplu işlemde aynı klasördeki her liste bir öncekinin "Hazır Tutanaklar"
   klasörünü zaman damgalı ada taşır (veri kaybı yok; son liste düz adlı klasörde).
 - İlerleme çubuğu adım granülaritesi firma başınadır; tek bir firmanın çok

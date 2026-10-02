@@ -1924,3 +1924,47 @@ def test_excel_tutanak_sirasi_degismez(tmp_path):
     exay.firma_excel_olustur(df, str(out), kols)
     ws = openpyxl.load_workbook(out).active
     assert [ws.cell(r, 3).value for r in range(2, 7)] == list(df[kols[1]])
+
+
+def _ithalatli_liste(yol):
+    """Yeni GİB biçimi + 'GGB Tescil No'su (Alış İthalat İse)' sütunu; RHEINZINK
+    satırı GERÇEK dosyadaki gibi yer tutucu VKN (1111111111) + dolu GGB."""
+    kols = ["Alış Faturasının Tarihi", "Alış Faturasının Sıra No'su", "Satıcının Adı-Soyadı / Ünvanı",
+            "Satıcının Vergi Kimlik Numarası / TC Kimlik Numarası",
+            "Alınan Mal ve/veya Hizmetin KDV Hariç Tutarı", "KDV'si", "GGB Tescil No'su (Alış İthalat İse)"]
+    pd.DataFrame([
+        ["2026-08-01", "A1", "ATAKAŞ", "0950303776", 200000, 40000, None],
+        ["2026-08-02", "B1", "KÜÇÜK B", "1000000002", 30000, 6000, None],
+        ["2026-08-03", "C1", "KÜÇÜK C", "1000000003", 20000, 4000, None],
+        ["2026-08-04", "00196927", "RHEINZINK GMBH& CO .KG", "1111111111", 750000, 150000, "26341200IM00196927"],
+    ], columns=kols).to_excel(yol, index=False)
+
+
+def test_ithalat_yuzde80_hesabina_katilmaz(tmp_path):
+    """Kullanıcı kararı: ithalat (GGB'li) satırlar %80'e katılmaz; tutanaklanmaz,
+    'geçersiz VKN' de sayılmaz. (Eskiden RHEINZINK paydada kalıyordu.)"""
+    yol = tmp_path / "AGUSTOS_2026.xlsx"
+    _ithalatli_liste(yol)
+    df = exay.ana_listeyi_oku(str(yol))
+    yurtici, ithalat = exay.ithalat_satirlarini_ayir(df)
+    assert len(yurtici) == 3 and list(ithalat.iloc[:, 2]) == ["RHEINZINK GMBH& CO .KG"]
+    loglar = []
+    sec, gecersiz = exay.firmalari_filtrele(df, 150000, 450000, 80,
+                                            lambda m, t='': loglar.append(m))
+    assert len(gecersiz) == 0                                   # ithalat geçersiz sayılmaz
+    assert "1111111111" not in sec
+    assert any("ithalat" in m for m in loglar)
+    # Payda = 250.000 (yurtiçi): ATAKAŞ 200K = %80 → 2. aşama gerekmez
+    assert list(sec) == ["0950303776"]
+    wb, kapsam = exay.ozet_rapor_olustur(df, sec, gecersiz, 150000, 450000, 80, "08.2026", 1, 0)
+    assert kapsam == pytest.approx(80.0)
+    etiketler = {wb.active.cell(r, 1).value: wb.active.cell(r, 2).value for r in range(1, 30)}
+    assert etiketler["İthalat satırı (hesaba katılmadı)"] == 1
+    assert etiketler["İthalat tutarı (₺, hesaba katılmadı)"] == pytest.approx(750000)
+
+
+def test_ggb_sutunu_yoksa_hicbir_satir_ithalat_sayilmaz():
+    df = pd.DataFrame({"Satıcının Vergi Kimlik Numarası": ["1111111111"],
+                       "Alış Faturasının KDV Hariç Tutarı": [1000]})
+    yurtici, ithalat = exay.ithalat_satirlarini_ayir(df)
+    assert len(yurtici) == 1 and len(ithalat) == 0

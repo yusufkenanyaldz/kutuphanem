@@ -86,6 +86,7 @@ ARA_KDVYEDEK = ['toplam indirilecek kdv', 'indirilecek kdv']        # kdv_sutunu
 ARA_UNVAN    = ['satıcının adı', 'satıcı unvan', 'ünvan', 'unvan']
 ARA_CINS     = ['alınan mal ve/veya hizmetin cins', 'hizmetin cins', 'malın cins', 'cinsi']
 ARA_MIKTAR   = ['hizmetin miktar', 'malın miktar', 'miktar']
+ARA_GGB      = ['ggb']   # "GGB Tescil No'su (Alış İthalat İse)" — doluysa satır İTHALATTIR
 
 def kdv_sutunu_bul(kolonlar):
     """Faturanın KDV'si sütununu bulur. 'KDV'si', 'KDV si', 'KDVsi', 'KDV' gibi
@@ -748,6 +749,22 @@ def ayristirilamayan_tarih_kontrol(df):
 # ══════════════════════════════════════════
 #  FİLTRELEME
 # ══════════════════════════════════════════
+def ithalat_satirlarini_ayir(df):
+    """İthalat satırlarını ayırır → (df_yurtici, df_ithalat). İthalat = "GGB Tescil
+    No" (gümrük beyannamesi) hücresi DOLU satır. İş kuralı (kullanıcı kararı, Ekim
+    2026): ithalat %80 hesabına KATILMAZ ve karşıt inceleme yapılmaz — VKN'si
+    olmadığı (yabancı satıcı) için "geçersiz VKN" de SAYILMAZ (paydada kalmaz).
+    GGB sütunu olmayan listelerde (eski GİB, muhasebe) hiçbir satır ayrılmaz."""
+    col = sutun_bul(list(df.columns), ARA_GGB)
+    if not col:
+        return df, df.iloc[0:0]
+    def _dolu(v):
+        if v is None or (not isinstance(v, str) and pd.isna(v)):
+            return False
+        return str(v).strip().lower() not in ('', 'nan', 'none', '0')
+    maske = df[col].map(_dolu).astype(bool)
+    return df[~maske], df[maske]
+
 def firmalari_filtrele(df, esik_tek, esik_toplam, yuzde80, log_cb):
     vkn_col   = sutun_bul(list(df.columns), ARA_VKN)
     tutar_col = sutun_bul(list(df.columns), ARA_MATRAH)
@@ -755,6 +772,13 @@ def firmalari_filtrele(df, esik_tek, esik_toplam, yuzde80, log_cb):
 
     if not vkn_col:
         raise ValueError("VKN sütunu bulunamadı.")
+    # İthalat (GGB'li) satırlar %80 hesabına hiç girmez (ne seçilir ne paydada kalır)
+    df, df_ithalat = ithalat_satirlarini_ayir(df)
+    if len(df_ithalat):
+        ith_top = (df_ithalat[tutar_col].apply(lambda v: para_deger(v) or 0.0).sum()
+                   if tutar_col else 0.0)
+        log_cb(f"  🚢 {len(df_ithalat)} ithalat satırı ({ith_top:,.2f} ₺) %{yuzde80:.0f} "
+               f"hesabına katılmadı (GGB tescilli; karşıt inceleme yapılmaz).", "info")
     if not tutar_col:
         # Tutarsız seçim yapılamaz; eskiden sessizce 'hiçbir firma seçilmedi' diyordu.
         raise ValueError("Tutar (KDV hariç matrah) sütunu bulunamadı — %80 hesabı "
@@ -2189,6 +2213,7 @@ def ozet_rapor_olustur(df, secilen, df_gecersiz, esik_tek, esik_toplam,
             return 0.0
         return float(frame[tutar_col].apply(lambda v: para_deger(v) or 0.0).sum())
 
+    df, df_ithalat = ithalat_satirlarini_ayir(df)   # ithalat %80'e katılmaz
     toplam_liste  = _topla(df)
     secilen_tutar = sum(_topla(grp) for grp, _neden in secilen.values())
     gecersiz_tutar= _topla(df_gecersiz)
@@ -2210,6 +2235,8 @@ def ozet_rapor_olustur(df, secilen, df_gecersiz, esik_tek, esik_toplam,
         ("GERÇEK KAPSAM (%)",             round(kapsam_pct, 1)),
         ("Geçersiz kimlikli satır sayısı", 0 if df_gecersiz is None else len(df_gecersiz)),
         ("Geçersiz satırların tutarı (₺)", round(gecersiz_tutar, 2)),
+        ("İthalat satırı (hesaba katılmadı)", len(df_ithalat)),
+        ("İthalat tutarı (₺, hesaba katılmadı)", round(_topla(df_ithalat), 2)),
     ]
 
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Özet"
