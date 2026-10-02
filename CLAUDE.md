@@ -141,6 +141,13 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
   biçim için de saf Python'dur (`.doc`→olefile, `.docx`→python-docx).
 - `WORD_ESLESME_DÖNEM.xlsx` — hangi seçili firmanın şablonu var/yok ve Word
   tutanağının üretilip üretilmediği (Word olmadan da çıkarılır).
+- `01 FİRMA VE MUH. BİLGİLERİ <AY> <YIL>.xlsx` — **ayın firma takip dosyası**
+  (kullanıcının her ay elle hazırladığı dosyanın aynısı): `SR | FİRMA | VKN | KDV |
+  TÜR | BELGE ID | AÇIKLAMA | SMMM | YMM | TELEFONU | ADRESİ | DURUM`. SR = tutanak
+  numarası; KDV = firmanın KDV toplamı; AÇIKLAMA/SMMM/YMM/TELEFONU/ADRESİ geçmiş
+  takip dosyalarından TAŞINIR (her alan için en yeni dolu değer); BELGE ID ve DURUM o
+  aya özgüdür, boş başlar. Geçmişte olmayan firma SARI. İthalat satıcıları en altta
+  `TÜR=İTHALAT`. TÜR sütununda açılır liste (EXCEL/KİT/YMM/İTHALAT). Her modda üretilir.
 
 ---
 
@@ -194,8 +201,11 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `_bos_klasor_adi` | Var olmayan klasör adı (`_2`, `_3`…). Eski "Hazır Tutanaklar" klasörü (içinde yalnız Word/PDF olsa da) taşınır; taşınamazsa (içindeki dosya açık) yeni çıktılar damgalı ayrı klasöre yazılır. |
 | `guvenli_kaydet` / `_dosya_kilitli_mesaji` | Windows uzun yol (~260) sorununda dosya adını kısaltarak yeniden kaydeder. Çıktı dosyası Excel/Word'de AÇIKSA (PermissionError) net Türkçe mesajla yükseltir — farklı adla sessizce kaydetmez. `.docx` karşılığı `_guvenli_docx_kaydet`; yan raporlar da bu yoldan kaydedilir. |
 | `firma_excel_olustur` | Tek firmanın tutanak Excel'ini şablona göre yazar. |
-| `dosyalari_isle` | Orkestrasyon: oku → **ön bilgi + doğruluk uyarıları** → filtrele → her firma için üret → yan dosyalar + kalıcı günlük. Opsiyonel `ilerleme_cb`, `cikis_kok`, `pdf_uret`, `sablon_klasor`, **`cikti_turu`** ('excel'/'word'/'ikisi'). Ardışık numara yalnızca üretilen firmalar için. |
-| `KDVBolmeApp` | Tkinter GUI (sürükle-bırak **çoklu/toplu**, eşik + **doğrulama**, **çıktı türü seçici**, çıktı klasörü, PDF onayı, Word şablon klasörü, ilerleme çubuğu, log, logo, ayarları hatırlama). |
+| `dosyalari_isle` | Orkestrasyon: oku → **ön bilgi + doğruluk uyarıları** → filtrele → takip bilgisi + belge türü → her firma için üret → yan dosyalar + takip dosyası + kalıcı günlük. Opsiyonel `ilerleme_cb`, `cikis_kok`, `pdf_uret`, `sablon_klasor`, **`cikti_turu`** ('excel'/'word'/'ikisi'/**'firmaya_gore'**), `takip_klasor`, `bos_sablon` (KİT), `bos_ymm_sablon`, `devam_sablon`. Ardışık numara yalnızca üretilen firmalar için. |
+| `takip_dosyalarini_bul` / `takip_dosyasi_oku` / `takip_gecmisi_oku` / `takip_bilgisi_esle` | Geçmiş takip dosyalarını ("…FİRMA…BİLGİ….xls[x]") liste klasörü + bir üstü + takip klasöründe (3 düzey, AppData vb. atlanır) bulur; başlık satırını ('FİRMA' + SMMM/YMM/…) kendisi bulur; eskiden yeniye (addaki dönem, `_ad_donemi`) okur; firmayı VKN'den, yoksa ünvandan (`_unvan_anahtari`: Türkçe-katlanmış, A.Ş./LTD./SAN./TİC. atılmış; `_unvan_eslesir`: eşit ya da ≥10 karakterlik baş — kırpılmış ünvanlar) eşler. Gerçek Ağustos 2026: 39 firmadan 38'i eşleşti (kalan 1 takipte yok). |
+| `_tur_cikar` / `tur_normalize` | TÜR sütunu olmayan eski takip dosyasında tür çıkarımı: **YMM dolu → YMM; BELGE ID dolu ya da açıklamada 'sistem' → EXCEL; diğer → KİT** (gerçek Ağustos dosyasında kullanıcının 24 Excel / 3 KİT çıktısıyla birebir). Açık TÜR sütunu her zaman önceliklidir. |
+| `firma_takip_dosyasi_yaz` / `takip_dosyasi_adi` | Ayın takip dosyasını yazar (bkz. §5). |
+| `KDVBolmeApp` | Tkinter GUI (sürükle-bırak **çoklu/toplu**, eşik + **doğrulama**, **çıktı türü seçici** (Excel/Word/İkisi/Firmaya göre), çıktı klasörü, **takip klasörü**, PDF onayı, Word şablon klasörü, boş KİT/YMM şablonu, KİT devam sayfası, ilerleme çubuğu, log, logo, ayarları hatırlama). |
 
 Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 (her firma) `firma_excel_olustur` → `guvenli_kaydet`.
@@ -233,7 +243,7 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 yöntemini otomatikleştirir). Çalıştırma:
 
 ```bash
-pytest -q        # 162 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
+pytest -q        # 180 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
                  # VKN normalizasyon, üç liste tipi (yeni/eski GİB + muhasebe),
                  # CSV okuma, kriter doğrulama, doğruluk uyarıları (kdv/mükerrer/
                  # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca,
@@ -288,7 +298,7 @@ kullanıcının elle hazırladığıyla birebir aynı çıktı. Gerçek müşter
 - Geçersiz kimlikli satırlar tutanaklanamaz; kullanıcı kaynak listede
   düzeltirse kapsam iyileşir (program uyarıyor).
 - ~~GUI'de ilerleme çubuğu yok~~ → **eklendi** (firma sayısına göre dolar).
-- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 162 test).
+- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 180 test).
 - ~~İşlem öncesi önizleme/uyarı yok~~ → **eklendi** (ÖN BİLGİ bloğu + KDV
   tutarlılık, mükerrer fatura, dönem-dışı tarih uyarıları — hepsi yalnızca
   uyarır, seçimi/iş kuralını etkilemez).
@@ -308,8 +318,16 @@ kullanıcının elle hazırladığıyla birebir aynı çıktı. Gerçek müşter
 - Doğruluk/veri kalitesi kontrolleri (KDV oranı, mükerrer, dönem, boş fatura no,
   VKN-ünvan tutarsızlığı, negatif tutar, ayrıştırılamayan tarih) **uyarı** niteliğindedir;
   satır silmez / seçimi değiştirmez — kullanıcı kaynakta düzeltir.
-- **Çıktı türü seçilebilir:** yalnız Excel / yalnız Word / ikisi. Word modları
-  şablon klasörü ister. Şablonda tek satır olsa da firmanın tüm faturaları
+- **Çıktı türü seçilebilir:** yalnız Excel / yalnız Word / ikisi / **firmaya göre**.
+  Word modları şablon klasörü ister. **Firmaya göre** (`firmaya_gore`): her firmaya
+  takip dosyasındaki TÜR'e göre YALNIZ bir belge — EXCEL → Excel tutanağı; KİT → KİT
+  (VKN'li KİT şablonu, yoksa boş KİT şablonu) + devam sayfası; YMM → YMM yazısı (YMM
+  şablonu, yoksa boş YMM şablonu). Aynı firmanın hem KİT hem YMM şablonu olabilir
+  (`_SablonIndeksi.hepsi`), türe uyan seçilir. O türde şablon yoksa resmî **Excel**
+  üretilir ve günlükte listelenir; Word üretimi hata verirse de Excel'e düşer. TÜR
+  takipte yoksa: firmanın şablon türü, o da yoksa EXCEL. Gerçek Ağustos 2026 (KİT +
+  YMM birleşik şablonlarla): 24 Excel + 13 YMM + 2 KİT — kullanıcının elle ürettiği
+  dağılımla aynı. Şablonda tek satır olsa da firmanın tüm faturaları
   yazılır (veri satırları temizlenip her fatura için satır eklenir).
 - **İnceleme Dayanağı (sözleşme):** GUI'den girilirse her Word tutanağının
   "İNCELEME DAYANAĞI" hücresi bununla ezilir — gözden kaçan eski yıl şablonları

@@ -1480,11 +1480,19 @@ def _sablon_kayitlari(path):
     except Exception:
         return []
 
+class _SablonIndeksi(dict):
+    """{vkn: (yol, blok)} — ayrıca `hepsi`: {vkn: [(yol, blok), …]} (aynı firmanın
+    hem KİT hem YMM şablonu olabilir; 'Firmaya göre' modu türe uyanı seçer)."""
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.hepsi = {}
+
 def sablonlari_indeksle(klasor, log_cb=None):
     """Verilen klasördeki (alt klasörler dahil) .doc VE .docx şablonlarını karşı
-    firma VKN'sine göre indeksler → {vkn: dosya_yolu}. Aynı VKN birden çok
-    şablonda varsa sonuncusu kullanılır ve uyarılır. Klasör yoksa boş sözlük."""
-    idx = {}
+    firma VKN'sine göre indeksler → {vkn: (yol, blok)}. Aynı VKN birden çok
+    şablonda varsa sonuncusu kullanılır ve uyarılır (hepsi `.hepsi`'nde durur).
+    Klasör yoksa boş sözlük."""
+    idx = _SablonIndeksi()
     kok = Path(klasor) if klasor else None
     if not kok or not kok.exists():
         return idx
@@ -1538,6 +1546,7 @@ def sablonlari_indeksle(klasor, log_cb=None):
                 log_cb(f"  ⚠️  Aynı VKN ({vkn}) için birden çok kayıt; sonuncusu "
                        f"kullanılacak: {p.name}", "warn")
             idx[vkn] = (yol, blok)
+            idx.hepsi.setdefault(vkn, []).append((yol, blok))
     if coklu and log_cb:
         log_cb(f"  🧩 {coklu} dosya çok-firmalı (tek Word'de birden çok tutanak) "
                f"olarak tanındı; her firma ayrı ayrı eşleştirildi.", "info")
@@ -2664,12 +2673,313 @@ def ozet_rapor_olustur(df, secilen, df_gecersiz, esik_tek, esik_toplam,
     return wb, kapsam_pct
 
 # ══════════════════════════════════════════
+#  FİRMA TAKİP DOSYASI ("01 FİRMA VE MUH. BİLGİLERİ <AY> <YIL>")
+#  Kullanıcı her ay seçilen firmaların SMMM/YMM/telefon/adres bilgilerini geçen
+#  ayın dosyasından kopyalıyordu. Program geçmiş takip dosyalarını bulur, firmayı
+#  VKN'den (yoksa ünvandan) eşleştirir, bu bilgileri taşır ve ayın dosyasını
+#  üretir. TÜR sütunu (EXCEL / KİT / YMM) firmanın belge türüdür: "Firmaya göre"
+#  çıktı modunda her firmaya yalnız o belge üretilir; kullanıcı bir kez düzeltir,
+#  sonraki aylara taşınır.
+# ══════════════════════════════════════════
+TAKIP_SUTUNLAR = ['SR', 'FİRMA', 'VKN', 'KDV', 'TÜR', 'BELGE ID', 'AÇIKLAMA',
+                  'SMMM', 'YMM', 'TELEFONU', 'ADRESİ', 'DURUM']
+# Aydan aya taşınan bilgiler (BELGE ID ve DURUM o aya özgüdür, taşınmaz)
+TAKIP_TASINAN = ('AÇIKLAMA', 'SMMM', 'YMM', 'TELEFONU', 'ADRESİ')
+BELGE_TURLERI = ('EXCEL', 'KİT', 'YMM', 'İTHALAT')
+
+def _takip_dosyasi_mi(p):
+    """Ad 'FİRMA … BİLGİ' içeren Excel dosyası mı? (ör. '01 FİRMA VE MUH. BİLGİLERİ
+    AĞUSTOS 2026.xls'; Türkçe/büyük-küçük harf duyarsız; Excel kilit dosyası hariç)."""
+    p = Path(p)
+    ad = _ascii_kucuk(p.stem)
+    return (p.suffix.lower() in ('.xls', '.xlsx') and not p.name.startswith('~$')
+            and 'firma' in ad and 'bilgi' in ad)
+
+_TAKIP_ATLA = {'AppData', 'node_modules', 'Windows', 'Program Files',
+               'Program Files (x86)', 'ProgramData', '__pycache__'}
+
+def takip_dosyalarini_bul(klasorler, en_derin=3, en_cok_klasor=4000):
+    """Klasörlerde (alt klasörler `en_derin` düzeye kadar) takip dosyalarını bulur.
+    Çok büyük klasör ağaçlarında takılmamak için gezilen klasör sayısı sınırlıdır."""
+    bulunan, gorulen, sayac = [], set(), 0
+    for kok in klasorler:
+        if not kok:
+            continue
+        kok = Path(kok)
+        if not kok.is_dir():
+            continue
+        taban = len(kok.resolve().parts)
+        for dizin, alt, dosyalar in os.walk(kok):
+            sayac += 1
+            if sayac > en_cok_klasor:
+                break
+            if len(Path(dizin).resolve().parts) - taban >= en_derin:
+                alt[:] = []
+            alt[:] = [a for a in alt if not a.startswith(('.', '$')) and a not in _TAKIP_ATLA]
+            for ad in dosyalar:
+                p = Path(dizin) / ad
+                if _takip_dosyasi_mi(p):
+                    anahtar = str(p.resolve()).lower()
+                    if anahtar not in gorulen:
+                        gorulen.add(anahtar)
+                        bulunan.append(p)
+    return bulunan
+
+def _takip_basligi(deger):
+    """Takip dosyası başlık hücresini standart sütun adına çevirir (yoksa None)."""
+    b = re.sub(r'[^a-z0-9 ]', ' ', _ascii_kucuk(str(deger or '')))
+    b = re.sub(r'\s+', ' ', b).strip()
+    if not b:
+        return None
+    if b in ('sr', 'sira', 'sira no', 's no', 'no'):
+        return 'SR'
+    if b.startswith('firma') or 'unvan' in b:
+        return 'FİRMA'
+    if b in ('vkn', 'tckn', 'vkn tckn') or b.startswith(('vergi kimlik', 'vergi no', 'vkn ')):
+        return 'VKN'
+    if b in ('tur', 'belge turu', 'belge tur', 'tutanak turu', 'cikti turu'):
+        return 'TÜR'
+    if b.startswith('belge id') or b in ('belge no', 'belgeid'):
+        return 'BELGE ID'
+    if b.startswith('aciklama'):
+        return 'AÇIKLAMA'
+    if b == 'smmm' or b.startswith('smmm '):
+        return 'SMMM'
+    if b == 'ymm' or b.startswith('ymm '):
+        return 'YMM'
+    if b.startswith('telefon'):
+        return 'TELEFONU'
+    if b.startswith('adres'):
+        return 'ADRESİ'
+    if b.startswith('durum'):
+        return 'DURUM'
+    if b == 'kdv' or b.startswith('kdv '):
+        return 'KDV'
+    return None
+
+def _hucre_metni(v):
+    if v is None or (not isinstance(v, str) and pd.isna(v)):
+        return ''
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return re.sub(r'\s+', ' ', str(v)).strip()
+
+def tur_normalize(v):
+    """Kullanıcının yazdığı belge türünü standartlaştırır: 'excel', 'Sistem' → EXCEL;
+    'kit', 'K.İ.T.', 'word' → KİT; 'ymm', 'YMM yazısı' → YMM; 'ithalat' → İTHALAT.
+    Tanınmazsa None."""
+    t = re.sub(r'[^a-z]', '', _ascii_kucuk(_hucre_metni(v)))
+    if not t:
+        return None
+    if t.startswith('ymm'):
+        return 'YMM'
+    if t.startswith(('excel', 'xls', 'sistem')):
+        return 'EXCEL'
+    if t.startswith(('kit', 'word', 'tutanak')):
+        return 'KİT'
+    if t.startswith('ithal'):
+        return 'İTHALAT'
+    return None
+
+def _tur_cikar(kayit):
+    """TÜR sütunu olmayan (eski) takip dosyası satırından belge türünü çıkarır.
+    Kullanıcının Ağustos 2026 dosyasıyla birebir doğrulandı: YMM dolu → YMM yazısı;
+    BELGE ID dolu (e-YMM sisteminden gönderilmiş) ya da açıklamada 'sistem' → EXCEL;
+    diğerleri → KİT."""
+    if kayit.get('YMM'):
+        return 'YMM'
+    if kayit.get('BELGE ID') or 'sistem' in _ascii_kucuk(kayit.get('AÇIKLAMA', '')):
+        return 'EXCEL'
+    return 'KİT'
+
+def _ad_donemi(stem):
+    """Dosya adından (yıl, ay) — 'AĞUSTOS 2026', '08.2026', '2026-08' gibi. Yoksa None."""
+    ad = _ascii_kucuk(stem)
+    yil = re.search(r'(?<!\d)(20\d{2})(?!\d)', ad)
+    aylar = ['ocak', 'subat', 'mart', 'nisan', 'mayis', 'haziran', 'temmuz',
+             'agustos', 'eylul', 'ekim', 'kasim', 'aralik']
+    for i, a in enumerate(aylar, 1):
+        if a in ad and yil:
+            return (int(yil.group(1)), i)
+    m = (re.search(r'(?<!\d)(0?[1-9]|1[0-2])[._\-/ ](20\d{2})(?!\d)', ad)
+         or re.search(r'(?<!\d)(20\d{2})[._\-/ ](0?[1-9]|1[0-2])(?!\d)', ad))
+    if m:
+        a, b = m.groups()
+        return (int(b), int(a)) if len(b) == 4 else (int(a), int(b))
+    return None
+
+def takip_dosyasi_oku(yol):
+    """Bir takip dosyasının firma satırlarını standart sütun adlarıyla döndürür:
+    [{'FİRMA':…, 'VKN':…, 'TÜR':…, 'AÇIKLAMA':…, …}]. Başlık satırı ('FİRMA' +
+    SMMM/YMM/AÇIKLAMA) ilk 15 satırda aranır; tüm sayfalar okunur. TÜR sütunu
+    yoksa satırdan çıkarılır (`_tur_cikar`)."""
+    kayitlar = []
+    sayfalar = pd.read_excel(yol, sheet_name=None, header=None, dtype=object)
+    for _ad, ham in sayfalar.items():
+        bas, harita = None, {}
+        for i in range(min(15, len(ham))):
+            h = {}
+            for j, v in enumerate(ham.iloc[i].tolist()):
+                ad = _takip_basligi(v)
+                if ad and ad not in h.values():
+                    h[j] = ad
+            ads = set(h.values())
+            if 'FİRMA' in ads and ads & {'SMMM', 'YMM', 'AÇIKLAMA', 'TELEFONU'}:
+                bas, harita = i, h
+                break
+        if bas is None:
+            continue
+        tur_var = 'TÜR' in harita.values()
+        for i in range(bas + 1, len(ham)):
+            satir = ham.iloc[i].tolist()
+            k = {ad: _hucre_metni(satir[j]) if j < len(satir) else ''
+                 for j, ad in harita.items()}
+            firma = k.get('FİRMA', '')
+            if not firma or not re.search(r'[A-Za-zÇĞİÖŞÜçğıöşü]', firma):
+                continue                                   # boş / toplam satırı
+            if k.get('VKN'):
+                v = _vkn_std(k['VKN'])
+                k['VKN'] = v if _vkn_gecerli_mi(v) else ''
+            t = tur_normalize(k.get('TÜR')) if tur_var else None
+            k['TÜR'] = t or _tur_cikar(k)
+            kayitlar.append(k)
+    return kayitlar
+
+_UNVAN_DOLGU = {'a', 's', 'as', 'ltd', 'sti', 'ltdsti', 'san', 'tic', 'sanayi',
+                'ticaret', 've', 'limited', 'sirketi', 'sirket', 'anonim'}
+
+def _unvan_anahtari(unvan):
+    """Ünvan karşılaştırma anahtarı: Türkçe-katlanmış, noktalama ve şirket türü
+    kelimeleri (A.Ş., LTD. ŞTİ., SAN., TİC., VE…) atılmış, boşluksuz."""
+    t = re.sub(r'[^a-z0-9]+', ' ', _ascii_kucuk(_hucre_metni(unvan)))
+    return ''.join(k for k in t.split() if k not in _UNVAN_DOLGU)
+
+def _unvan_eslesir(a, b):
+    """İki ünvan anahtarı aynı firmayı mı gösteriyor? Eşit; ya da biri diğerinin
+    BAŞI (listeler uzun ünvanı kırpar) ve kısa olan en az 10 karakter."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    kisa, uzun = (a, b) if len(a) <= len(b) else (b, a)
+    return len(kisa) >= 10 and uzun.startswith(kisa)
+
+def takip_gecmisi_oku(dosyalar, log_cb=None):
+    """Takip dosyalarını ESKİDEN YENİYE sıralı okur → [(dosya, kayitlar)]. Sıra:
+    addaki dönem (yoksa değiştirilme tarihi), aynı dönemde değiştirilme tarihi."""
+    sirali = []
+    for p in dosyalar:
+        p = Path(p)
+        try:
+            mt = p.stat().st_mtime
+        except Exception:
+            continue
+        d = _ad_donemi(p.stem)
+        if d is None:
+            z = datetime.fromtimestamp(mt)
+            d = (z.year, z.month)
+        sirali.append((d, mt, p))
+    sirali.sort(key=lambda x: (x[0], x[1]))
+    gecmis = []
+    for _d, _mt, p in sirali:
+        try:
+            gecmis.append((p, takip_dosyasi_oku(str(p))))
+        except Exception as e:
+            if log_cb:
+                log_cb(f"  ⚠️  Takip dosyası okunamadı ({p.name}): {e}", "warn")
+    return gecmis
+
+def takip_bilgisi_esle(firmalar, gecmis):
+    """Her firma için geçmiş takip dosyalarından bilgileri toplar.
+    firmalar: [(vkn, unvan)]. Eşleşme: VKN (takip dosyasında varsa), yoksa ünvan.
+    Her alan için EN YENİ dolu değer alınır; TÜR en yeni kayıttan gelir.
+    Döner: {vkn: {'alanlar': {...}, 'tur': 'EXCEL'|'KİT'|'YMM'|None,
+                  'kaynak': son dosya adı | None}}."""
+    anahtarlar = {v: _unvan_anahtari(u) for v, u in firmalar}
+    sonuc = {v: {'alanlar': {}, 'tur': None, 'kaynak': None} for v, _u in firmalar}
+    for p, kayitlar in gecmis:                      # eskiden yeniye → yeni olan ezer
+        for k in kayitlar:
+            kvkn = k.get('VKN', '')
+            if kvkn and kvkn in sonuc:
+                hedefler = [kvkn]
+            else:
+                ka = _unvan_anahtari(k.get('FİRMA', ''))
+                hedefler = [v for v, a in anahtarlar.items()
+                            if _unvan_eslesir(a, ka) and not (kvkn and kvkn != v)]
+                if len(hedefler) > 1:               # belirsiz: tam eşit olanı seç
+                    tam = [v for v in hedefler if anahtarlar[v] == ka]
+                    hedefler = tam if len(tam) == 1 else []
+            for v in hedefler:
+                s = sonuc[v]
+                for alan in TAKIP_TASINAN:
+                    if k.get(alan):
+                        s['alanlar'][alan] = k[alan]
+                if k.get('TÜR'):
+                    s['tur'] = k['TÜR']
+                s['kaynak'] = p.name
+    return sonuc
+
+def firma_takip_dosyasi_yaz(yol, satirlar, donem):
+    """Ayın takip dosyasını yazar. satirlar: [{'SR','FİRMA','VKN','KDV','TÜR',
+    alanlar…, 'yeni': bool}]. Geçmişte bulunmayan (yeni) firmalar sarı; TÜR
+    sütununda açılır liste (EXCEL/KİT/YMM/İTHALAT); en altta KDV toplamı."""
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.worksheet.datavalidation import DataValidation
+    ay, yil = int(donem[:2]), donem[3:7]
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.title = f"{_AYLAR_TR[ay - 1]} {yil}"
+    for c, b in enumerate(TAKIP_SUTUNLAR, 1):
+        h = ws.cell(1, c, value=b); h.font = Font(bold=True)
+        h.alignment = Alignment(horizontal='center', vertical='center')
+    sari = PatternFill('solid', fgColor='FFF2CC')
+    toplam = 0.0
+    for r, s in enumerate(satirlar, 2):
+        for c, ad in enumerate(TAKIP_SUTUNLAR, 1):
+            v = s.get(ad, '')
+            if ad == 'KDV':
+                ws.cell(r, c, value=float(v or 0)).number_format = '#,##0.00'
+                toplam += float(v or 0)
+            elif ad == 'SR':
+                ws.cell(r, c, value=v if v != '' else None)
+            else:
+                _metin_hucre(ws, r, c, str(v or ''), False)
+                if ad == 'VKN':
+                    ws.cell(r, c).number_format = '@'
+            if s.get('yeni'):
+                ws.cell(r, c).fill = sari
+    son = len(satirlar) + 2
+    ws.cell(son, 2, value='TOPLAM').font = Font(bold=True)
+    t = ws.cell(son, 4, value=round(toplam, 2)); t.font = Font(bold=True)
+    t.number_format = '#,##0.00'
+    if satirlar:
+        dv = DataValidation(type='list', formula1='"EXCEL,KİT,YMM,İTHALAT"', allow_blank=True)
+        dv.error = "EXCEL, KİT, YMM ya da İTHALAT yazın."
+        ws.add_data_validation(dv)
+        dv.add(f"E2:E{len(satirlar) + 1}")
+    for harf, gen in zip('ABCDEFGHIJKL', (5, 48, 13, 15, 9, 34, 30, 22, 20, 24, 44, 26)):
+        ws.column_dimensions[harf].width = gen
+    ws.freeze_panes = 'C2'
+    ws.auto_filter.ref = f"A1:L{max(1, len(satirlar) + 1)}"
+    return guvenli_kaydet(wb, yol)
+
+def takip_dosyasi_adi(donem):
+    ay, yil = int(donem[:2]), donem[3:7]
+    return f"01 FİRMA VE MUH. BİLGİLERİ {_AYLAR_TR[ay - 1]} {yil}.xlsx"
+
+# ══════════════════════════════════════════
 #  ANA İŞLEM
 # ══════════════════════════════════════════
 def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb,
                    ilerleme_cb=None, cikis_kok=None, pdf_uret=False,
                    sablon_klasor=None, cikti_turu='ikisi', inceleme_dayanagi=None,
-                   word_tek_dosya=False, bos_sablon=None, devam_sablon=None):
+                   word_tek_dosya=False, bos_sablon=None, devam_sablon=None,
+                   takip_klasor=None, bos_ymm_sablon=None):
+    # takip_klasor: geçmiş aylık firma takip dosyalarının ("01 FİRMA VE MUH. BİLGİLERİ
+    #   …") klasörü; liste klasörü ve bir üstü de her zaman taranır. Ayın takip dosyası
+    #   (SMMM/YMM/telefon/adres taşınmış, TÜR sütunlu) çıktı klasörüne yazılır.
+    # cikti_turu='firmaya_gore': her firmaya takip dosyasındaki TÜR'üne göre YALNIZ
+    #   Excel ya da KİT ya da YMM yazısı üretilir (şablonu yoksa Excel'e düşer).
+    # bos_ymm_sablon: şablonu olmayan YMM firmaları için boş YMM yazısı şablonu.
     # devam_sablon: KİT devam sayfası (2 yatay sayfa); verilirse her KİT'in arkasına
     #   ay başlıkları döneme göre güncellenerek eklenir (YMM yazılarına eklenmez).
     # word_tek_dosya: üretilen .docx tutanakları tek bir dosyada (her firma yeni
@@ -2684,8 +2994,10 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
     #   güncellenerek Word tutanağı da üretilir.
     # cikti_turu: 'excel' (yalnız Excel), 'word' (yalnız Word — şablon gerekir),
     #   'ikisi' (Excel + eşleşen firmalar için Word). Varsayılan 'ikisi'.
-    excel_iste = cikti_turu in ('excel', 'ikisi')
-    word_iste  = cikti_turu in ('word', 'ikisi') and bool(sablon_klasor)
+    firma_gore = cikti_turu == 'firmaya_gore'
+    excel_iste = cikti_turu in ('excel', 'ikisi')          # firmaya göre: firma başına
+    word_iste  = ((cikti_turu in ('word', 'ikisi') and bool(sablon_klasor))
+                  or (firma_gore and bool(sablon_klasor or bos_sablon or bos_ymm_sablon)))
     def _ilerle(t, top):
         if ilerleme_cb:
             try: ilerleme_cb(t, top)
@@ -2822,7 +3134,9 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
 
         # Çıktı türünü bildir
         _mod = {'excel': 'yalnız Excel', 'word': 'yalnız Word',
-                'ikisi': 'Excel + (eşleşen firmalar için) Word'}.get(cikti_turu, 'Excel + Word')
+                'ikisi': 'Excel + (eşleşen firmalar için) Word',
+                'firmaya_gore': 'firmaya göre (takip dosyasındaki TÜR: Excel / KİT / YMM)'
+                }.get(cikti_turu, 'Excel + Word')
         log_cb(f"🧾 Çıktı türü: {_mod}", "info")
         if cikti_turu == 'word' and not sablon_klasor:
             log_cb("  ⚠️  'Yalnız Word' seçildi ama şablon klasörü seçilmedi — "
@@ -2830,7 +3144,10 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
 
         # ── Word şablonları: gerekiyorsa VKN'ye göre indeksle ──
         sablon_index = {}
-        if word_iste:
+        if firma_gore and not word_iste:
+            log_cb("  ⚠️  'Firmaya göre' seçildi ama Word şablon klasörü / boş şablon yok — "
+                   "KİT ve YMM firmaları da Excel olarak üretilecek.", "warn")
+        if word_iste and sablon_klasor:
             log_cb(f"🗂  Word şablonları taranıyor: {sablon_klasor}", "info")
             try:
                 sablon_index = sablonlari_indeksle(sablon_klasor, log_cb)
@@ -2857,16 +3174,99 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
         word_sablonsuz = []   # (vkn, unvan) — seçilmiş, şablonu yok ve boş şablon da yok
         word_bloklar = []     # (sira, vkn, unvan, doc) — tek dosyada birleştirmek için
         bos_uretilen = []     # (vkn, unvan) — boş/yedek şablonla üretilen firmalar
-        if bos_sablon and word_iste:
-            log_cb(f"  🆕 Eşleşmeyen firmalar için boş şablon kullanılacak: "
-                   f"{Path(bos_sablon).name}", "info")
+        # Boş şablonlar türüne göre (KİT tutanağı / YMM yazısı) ayrılır
+        bos_kit = bos_ymm = None
+        if word_iste and docx_destekli():
+            for b in (bos_sablon, bos_ymm_sablon):
+                if b and str(b).lower().endswith('.docx') and Path(b).exists():
+                    if _sablon_ymm_mi(str(b)):
+                        bos_ymm = bos_ymm or str(b)
+                    else:
+                        bos_kit = bos_kit or str(b)
+        for b, ad in ((bos_kit, 'KİT'), (bos_ymm, 'YMM')):
+            if b:
+                log_cb(f"  🆕 Şablonu olmayan {ad} firmaları için boş şablon: {Path(b).name}",
+                       "info")
+        _tur_onbellek = {}
+        def _sablon_turu(sy):
+            """Şablon kaydının türü: 'YMM' (Bilgi İsteme yazısı) ya da 'KİT'."""
+            k = _sablon_yol_blok(sy)
+            if k not in _tur_onbellek:
+                _tur_onbellek[k] = 'YMM' if _sablon_ymm_mi(*k) else 'KİT'
+            return _tur_onbellek[k]
+        def _turlu_sablon(vkn, tur):
+            """Firmanın `tur` türündeki şablonu (yoksa None)."""
+            adaylar = getattr(sablon_index, 'hepsi', {}).get(vkn) or (
+                [sablon_index[vkn]] if vkn in sablon_index else [])
+            for sy in reversed(adaylar):                      # en son taranan önce
+                if _sablon_turu(sy) == tur and sablon_uretilebilir_mi(sy):
+                    return sy
+            return None
+
+        # ── Firma takip bilgisi (geçmiş aylardan SMMM/YMM/telefon/adres + TÜR) ──
+        unvan_col = sutun_bul(list(df.columns), ARA_UNVAN)
+        kdv_col   = kdv_sutunu_bul(list(df.columns))
+        def _ilk_unvan(g):
+            uv = g[unvan_col].dropna().unique() if unvan_col else []
+            return str(uv[0]).strip() if len(uv) else ''
+        def _kdv_top(g):
+            if not kdv_col:
+                return 0.0
+            return float(g[kdv_col].apply(lambda v: para_deger(v) or 0.0).sum())
+        firma_unvan = {v: _ilk_unvan(g) for v, (g, _n) in secilen.items()}
+        ithalat_firmalar = []                                  # [(anahtar, ünvan, kdv)]
+        _yurtici, _ith = ithalat_satirlarini_ayir(df)
+        if len(_ith) and unvan_col:
+            for u, g in _ith.groupby(_ith[unvan_col].fillna('').astype(str).str.strip(),
+                                     sort=False):
+                ithalat_firmalar.append((f"İTH:{u}", u, _kdv_top(g)))
+        takip, takip_dosyalari = {}, []
+        try:
+            aranan = [takip_klasor, Path(kaynak).parent]
+            ust = Path(kaynak).resolve().parent.parent
+            if len(ust.parts) > 1 and ust != ust.parent and ust != Path.home():
+                aranan.append(ust)
+            takip_dosyalari = takip_dosyalarini_bul(aranan)
+            gecmis = takip_gecmisi_oku(takip_dosyalari, log_cb)
+            takip = takip_bilgisi_esle(
+                list(firma_unvan.items()) + [(a, u) for a, u, _k in ithalat_firmalar], gecmis)
+        except Exception as e:
+            log_cb(f"  ⚠️  Firma takip dosyaları okunamadı: {e}", "warn")
+        takip_tur = {v: (takip.get(v) or {}).get('tur') for v in firma_unvan}
+        turler, tur_kaynagi = {}, {}
+        for v in firma_unvan:
+            t = takip_tur.get(v)
+            if t in ('EXCEL', 'KİT', 'YMM'):
+                turler[v], tur_kaynagi[v] = t, 'takip'
+            elif v in sablon_index:
+                turler[v], tur_kaynagi[v] = _sablon_turu(sablon_index[v]), 'şablon'
+            else:
+                turler[v], tur_kaynagi[v] = 'EXCEL', 'varsayılan'
+        bilinen = sum(1 for v in firma_unvan if (takip.get(v) or {}).get('kaynak'))
+        if takip_dosyalari:
+            log_cb(f"📒 Firma takip: {len(takip_dosyalari)} geçmiş dosya bulundu (en yenisi: "
+                   f"{Path(sorted(takip_dosyalari, key=lambda q: _ad_donemi(q.stem) or (0, 0))[-1]).name}); "
+                   f"{len(firma_unvan)} firmanın {bilinen}'inin bilgisi taşınacak.", "info")
+        else:
+            log_cb("📒 Firma takip: geçmiş takip dosyası ('… FİRMA … BİLGİLERİ ….xls') "
+                   "bulunamadı — bilgiler boş başlayacak. (Takip klasörü seçebilirsiniz.)",
+                   "warn")
+        if firma_gore:
+            sayim = {t: sum(1 for x in turler.values() if x == t) for t in ('EXCEL', 'KİT', 'YMM')}
+            log_cb(f"  🧾 Belge türü: {sayim['EXCEL']} Excel, {sayim['KİT']} KİT, "
+                   f"{sayim['YMM']} YMM yazısı.", "info")
+            tahmin = [v for v in turler if tur_kaynagi[v] != 'takip']
+            if tahmin:
+                log_cb(f"  ℹ️  {len(tahmin)} firmanın türü takip dosyasında yok; "
+                       f"şablonundan ya da varsayılan (Excel) alındı — takip dosyasındaki "
+                       f"TÜR sütunundan düzeltebilirsiniz.", "warn")
+        tur_yedek = []        # (vkn, unvan, tur) — Word şablonu yok → Excel üretildi
         if word_tek_dosya and word_iste:
             log_cb("  🧩 Word tutanakları tek dosyada birleştirilecek (yalnızca .docx).", "info")
         devam_doc = (devam_sayfasi_hazirla(devam_sablon, donem, log_cb)
                      if (word_iste and devam_sablon) else None)
         log_cb(f"{'─'*50}", "info")
 
-        unvan_col = sutun_bul(list(df.columns), ARA_UNVAN)
         fno_col   = sutun_bul(list(df.columns), ARA_FATNO)
         basarili  = 0; hatali = []
         vkn_sirali = []   # tutanağı oluşturulan firmaların VKN'leri (dosya sırasıyla)
@@ -2888,8 +3288,27 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
             uretildi = False          # bu firma için en az bir dosya üretildi mi?
             hata_mesaji = None        # Excel/Word üretim hatası (varsa)
 
-            # ── Excel tutanağı ──
-            if excel_iste:
+            # ── Bu firma için ne üretilecek? ──
+            excel_bu, word_bu, sy_bu, bos_bu = excel_iste, word_iste, None, None
+            tur_bu = turler.get(vkn)
+            if firma_gore:
+                excel_bu, word_bu = tur_bu == 'EXCEL', False
+                if tur_bu in ('KİT', 'YMM'):
+                    sy_bu = _turlu_sablon(vkn, tur_bu) if word_iste else None
+                    bos_bu = None if sy_bu else (bos_ymm if tur_bu == 'YMM' else bos_kit)
+                    if sy_bu or bos_bu:
+                        word_bu = True
+                    else:                       # türün şablonu yok → resmî Excel üretilir
+                        excel_bu = True
+                        tur_yedek.append((vkn, unvan, tur_bu))
+            elif word_bu:
+                sy_bu = sablon_index.get(vkn)
+                if not sy_bu:
+                    bos_bu = ((bos_ymm or bos_kit) if takip_tur.get(vkn) == 'YMM'
+                              else (bos_kit or bos_ymm))
+
+            def _excel_uret():
+                nonlocal uretildi, hata_mesaji
                 try:
                     ad = f"{sira_no}) {donem.replace('.','_')}_{vkn}_{temiz}.xlsx"
                     kayitli_yol = firma_excel_olustur(grp, str(cikis_kl / ad), list(df.columns))
@@ -2903,13 +3322,16 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                 except Exception as e:
                     hata_mesaji = str(e)
 
+            # ── Excel tutanağı ──
+            if excel_bu:
+                _excel_uret()
+
             # ── Word tutanağı (VKN ile eşleşen şablondan) ──
-            if word_iste:
-                sy = sablon_index.get(vkn)
-                if sy:
+            if word_bu:
+                if sy_bu:
                     word_eslesen.append((vkn, unvan))
-                    yol_, blok_ = _sablon_yol_blok(sy)
-                    if sablon_uretilebilir_mi(sy):
+                    yol_, blok_ = _sablon_yol_blok(sy_bu)
+                    if sablon_uretilebilir_mi(sy_bu):
                         try:
                             if word_tek_dosya and yol_.lower().endswith('.docx'):
                                 d_, _y = _firma_docx_hazirla(yol_, grp, list(df.columns),
@@ -2917,7 +3339,7 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                                             ek_belge=devam_doc)
                                 word_bloklar.append((sira_no, vkn, unvan, d_))
                             else:
-                                firma_word_uret(sy, grp, cikis_kl, sira_no, donem,
+                                firma_word_uret(sy_bu, grp, cikis_kl, sira_no, donem,
                                                 vkn, unvan, list(df.columns), log_cb,
                                                 inceleme_dayanagi=inceleme_dayanagi,
                                                 ek_belge=devam_doc)
@@ -2925,18 +3347,19 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                             uretildi = True
                         except Exception as we:
                             log_cb(f"      ⚠️ Word tutanağı üretilemedi ({vkn}): {we}", "warn")
-                            if not excel_iste and hata_mesaji is None:
+                            if not excel_bu and hata_mesaji is None:
                                 hata_mesaji = str(we)
-                elif bos_sablon and str(bos_sablon).lower().endswith('.docx') and docx_destekli():
+                elif bos_bu:
                     # Şablonu yok → boş/yedek şablondan üret (fatura + bilinen ünvan/VKN)
                     try:
-                        d_, _y = _firma_docx_hazirla(bos_sablon, grp, list(df.columns),
+                        d_, _y = _firma_docx_hazirla(bos_bu, grp, list(df.columns),
                                     inceleme_dayanagi, log_cb, blok=None, ek_belge=devam_doc)
                         _docx_nezdinde_yaz(d_, unvan, vkn)
                         if word_tek_dosya:
                             word_bloklar.append((sira_no, vkn, unvan, d_))
                         else:
-                            ad = _word_tutanak_adi(sira_no, unvan, donem, '.docx', ek='BOŞ')
+                            ad = _word_tutanak_adi(sira_no, unvan, donem, '.docx',
+                                                   ymm=(bos_bu == bos_ymm), ek='BOŞ')
                             _guvenli_docx_kaydet(d_, str(cikis_kl / ad))
                         bos_uretilen.append((vkn, unvan))
                         uretildi = True
@@ -2947,6 +3370,11 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                         word_sablonsuz.append((vkn, unvan))
                 else:
                     word_sablonsuz.append((vkn, unvan))
+                # Firmaya göre: Word üretilemediyse resmî Excel yine de çıksın
+                if firma_gore and not uretildi and not excel_bu:
+                    log_cb(f"      ↪ Word üretilemedi; Excel tutanağı üretiliyor ({vkn}).", "warn")
+                    hata_mesaji = None
+                    _excel_uret()
 
             # ── Sonuç: ardışık numaralandırma yalnızca üretilen firmalar için ──
             if uretildi:
@@ -3021,6 +3449,44 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                 log_cb(f"🗂  Şablon eşleşme raporu: WORD_ESLESME_{donem.replace('.','_')}.xlsx", "ok")
             except Exception as e:
                 log_cb(f"⚠️ Şablon eşleşme raporu yazılamadı: {e}", "warn")
+
+        if tur_yedek:
+            log_cb(f"⚠️  {len(tur_yedek)} firmanın türü KİT/YMM ama o türde şablonu yok — "
+                   f"Excel tutanağı üretildi (şablonu Cowork ile hazırlayıp şablon "
+                   f"klasörüne koyabilir ya da boş KİT/YMM şablonu seçebilirsiniz):", "warn")
+            for v, uv, t in tur_yedek[:15]:
+                log_cb(f"   • {t:4} {v:15} {uv[:35]}", "warn")
+            if len(tur_yedek) > 15:
+                log_cb(f"   … ve {len(tur_yedek)-15} firma daha", "warn")
+
+        # ── Ayın firma takip dosyası (geçmişten taşınmış bilgiler + TÜR) ──
+        try:
+            sira_haritasi = {v: s_ for s_, v, _u, _f in vkn_sirali}
+            hatali_vkn = {v for v, _u, _h in hatali}
+            satirlar = []
+            for v, (g, _n) in secilen.items():
+                bilgi = takip.get(v) or {}
+                sat = {'SR': sira_haritasi.get(v, ''), 'FİRMA': firma_unvan.get(v, ''),
+                       'VKN': v, 'KDV': round(_kdv_top(g), 2), 'TÜR': turler.get(v, ''),
+                       'yeni': not bilgi.get('kaynak')}
+                sat.update(bilgi.get('alanlar') or {})
+                if v in hatali_vkn:
+                    sat['DURUM'] = 'TUTANAK OLUŞTURULAMADI'
+                satirlar.append(sat)
+            for a, u, k in ithalat_firmalar:
+                bilgi = takip.get(a) or {}
+                sat = {'SR': '', 'FİRMA': u, 'VKN': '', 'KDV': round(k, 2),
+                       'TÜR': 'İTHALAT', 'DURUM': 'İTHALAT — %80 hesabına katılmadı'}
+                sat.update(bilgi.get('alanlar') or {})
+                satirlar.append(sat)
+            tyol = firma_takip_dosyasi_yaz(str(cikis_kl / takip_dosyasi_adi(donem)),
+                                           satirlar, donem)
+            yeniler = sum(1 for x in satirlar if x.get('yeni'))
+            log_cb(f"📒 Firma takip dosyası: {Path(tyol).name} ({len(satirlar)} satır"
+                   + (f"; {yeniler} yeni firma SARI — bilgilerini doldurun" if yeniler else "")
+                   + "). TÜR sütunu sonraki aylara taşınır.", "ok")
+        except Exception as e:
+            log_cb(f"⚠️ Firma takip dosyası yazılamadı: {e}", "warn")
 
         # ── Oluşturulamayan firmaları belirgin şekilde raporla (sessizce kaybolmasın) ──
         if hatali:
@@ -3180,7 +3646,7 @@ class KDVBolmeApp:
         self._cikis_kok  = ayar.get("cikis_kok") or None   # çıktı klasörü (None → kaynağın yanı)
         self.pdf_uret    = tk.BooleanVar(value=bool(ayar.get("pdf_uret", False)))
         self._sablon_klasor = ayar.get("sablon_klasor") or None  # Word şablon klasörü
-        # Çıktı türü: 'excel' | 'word' | 'ikisi'
+        # Çıktı türü: 'excel' | 'word' | 'ikisi' | 'firmaya_gore'
         self.cikti_turu  = tk.StringVar(value=ayar.get("cikti_turu", "excel"))
         # İnceleme Dayanağı (sözleşme) — her yıl değişir; boşsa şablon aynen kalır
         self.inceleme_dayanagi = tk.StringVar(value=ayar.get("inceleme_dayanagi", ""))
@@ -3189,6 +3655,10 @@ class KDVBolmeApp:
         self._bos_sablon = ayar.get("bos_sablon") or None
         # KİT devam sayfası (her KİT'in arkasına eklenir; ay başlıkları güncellenir)
         self._devam_sablon = ayar.get("devam_sablon") or None
+        # Şablonu olmayan YMM firmaları için boş YMM yazısı şablonu
+        self._bos_ymm_sablon = ayar.get("bos_ymm_sablon") or None
+        # Geçmiş aylık firma takip dosyalarının klasörü (boşsa liste klasörü + üstü)
+        self._takip_klasor = ayar.get("takip_klasor") or None
 
         self._ui()
         self._surukle_birak()
@@ -3220,6 +3690,8 @@ class KDVBolmeApp:
                     "word_tek_dosya": bool(self.word_tek_dosya.get()),
                     "bos_sablon":  self._bos_sablon or "",
                     "devam_sablon": self._devam_sablon or "",
+                    "bos_ymm_sablon": self._bos_ymm_sablon or "",
+                    "takip_klasor": self._takip_klasor or "",
                 }, f, ensure_ascii=False)
         except Exception:
             pass
@@ -3360,8 +3832,9 @@ class KDVBolmeApp:
                  font=F_KUC, anchor='w').pack(fill='x')
         seg = tk.Frame(ci, bg=KENAR); seg.pack(fill='x', pady=(4,8))
         self._seg_btn = {}
-        for etiket, deger in [("Excel","excel"), ("Word","word"), ("İkisi","ikisi")]:
-            b = tk.Label(seg, text=etiket, font=F_KUC, padx=8, pady=6, cursor='hand2')
+        for etiket, deger in [("Excel","excel"), ("Word","word"), ("İkisi","ikisi"),
+                              ("Firmaya göre","firmaya_gore")]:
+            b = tk.Label(seg, text=etiket, font=F_KUC, padx=4, pady=6, cursor='hand2')
             b.pack(side='left', fill='x', expand=True, padx=1, pady=1)
             b.bind('<Button-1>', lambda e, d=deger: self._segment_sec(d))
             self._seg_btn[deger] = b
@@ -3375,6 +3848,11 @@ class KDVBolmeApp:
         self.cikis_lbl = tk.Label(cf, text=self._cikis_ozet(), font=('Segoe UI',8),
                                   bg=KART, fg=GRI, anchor='w')
         self.cikis_lbl.pack(side='left', padx=(8,0), fill='x', expand=True)
+        tf = tk.Frame(ci, bg=KART); tf.pack(fill='x', pady=(4,0))
+        self._buton(tf, "Takip klasörü…", self._takip_klasoru_sec).pack(side='left')
+        self.takip_lbl = tk.Label(tf, text=self._takip_ozet(), font=('Segoe UI',8),
+                                  bg=KART, fg=GRI, anchor='w')
+        self.takip_lbl.pack(side='left', padx=(8,0), fill='x', expand=True)
 
         # Word Şablon bloğu (yalnız Word/İkisi seçiliyken görünür)
         self.word_blok = tk.Frame(ci, bg=KART)
@@ -3469,10 +3947,15 @@ class KDVBolmeApp:
                        font=('Segoe UI',8), anchor='w', command=self._ayar_kaydet,
                        wraplength=250).pack(fill='x')
         bf = tk.Frame(blok, bg=KART); bf.pack(fill='x', pady=(4,0))
-        self._buton(bf, "Boş şablon…", self._bos_sablon_sec).pack(side='left')
+        self._buton(bf, "Boş KİT şablonu…", self._bos_sablon_sec).pack(side='left')
         self.bos_lbl = tk.Label(bf, text=self._bos_ozet(), font=('Segoe UI',8),
                                 bg=KART, fg=GRI, anchor='w')
         self.bos_lbl.pack(side='left', padx=(8,0), fill='x', expand=True)
+        yf = tk.Frame(blok, bg=KART); yf.pack(fill='x', pady=(4,0))
+        self._buton(yf, "Boş YMM şablonu…", self._bos_ymm_sablon_sec).pack(side='left')
+        self.bos_ymm_lbl = tk.Label(yf, text=self._bos_ymm_ozet(), font=('Segoe UI',8),
+                                    bg=KART, fg=GRI, anchor='w')
+        self.bos_ymm_lbl.pack(side='left', padx=(8,0), fill='x', expand=True)
         df_ = tk.Frame(blok, bg=KART); df_.pack(fill='x', pady=(4,0))
         self._buton(df_, "KİT devam sayfası…", self._devam_sablon_sec).pack(side='left')
         self.devam_lbl = tk.Label(df_, text=self._devam_ozet(), font=('Segoe UI',8),
@@ -3480,9 +3963,9 @@ class KDVBolmeApp:
         self.devam_lbl.pack(side='left', padx=(8,0), fill='x', expand=True)
 
     def _word_blok_guncelle(self):
-        """Çıktı türü Word/İkisi ise Word Şablon bloğunu göster, değilse gizle."""
+        """Çıktı türü Word/İkisi/Firmaya göre ise Word Şablon bloğunu göster, değilse gizle."""
         try:
-            if self.cikti_turu.get() in ('word', 'ikisi'):
+            if self.cikti_turu.get() in ('word', 'ikisi', 'firmaya_gore'):
                 self.word_blok.pack(fill='x')
             else:
                 self.word_blok.pack_forget()
@@ -3662,9 +4145,41 @@ class KDVBolmeApp:
             pass
         self._ayar_kaydet()
 
+    def _bos_ymm_ozet(self):
+        if self._bos_ymm_sablon:
+            return f"→ {Path(self._bos_ymm_sablon).name}"
+        return "(seçilmedi)"
+
+    def _bos_ymm_sablon_sec(self):
+        d = filedialog.askopenfilename(
+            title="Şablonu olmayan YMM firmaları için boş YMM yazısı (.docx) seçin",
+            filetypes=[("Word .docx", "*.docx"), ("Tümü", "*.*")])
+        self._bos_ymm_sablon = d or None
+        try:
+            self.bos_ymm_lbl.config(text=self._bos_ymm_ozet())
+        except Exception:
+            pass
+        self._ayar_kaydet()
+
+    def _takip_ozet(self):
+        if self._takip_klasor:
+            return f"→ {Path(self._takip_klasor).name or self._takip_klasor}"
+        return "(liste klasörü ve üstü taranır)"
+
+    def _takip_klasoru_sec(self):
+        d = filedialog.askdirectory(
+            title="Geçmiş aylık '01 FİRMA VE MUH. BİLGİLERİ' dosyalarının klasörü "
+                  "(İptal → liste klasörü ve üstü taranır)")
+        self._takip_klasor = d or None
+        try:
+            self.takip_lbl.config(text=self._takip_ozet())
+        except Exception:
+            pass
+        self._ayar_kaydet()
+
     def _bos_sablon_sec(self):
         d = filedialog.askopenfilename(
-            title="Eşleşmeyen firmalar için boş .docx şablonu seçin",
+            title="Şablonu olmayan KİT firmaları için boş .docx şablonu seçin",
             filetypes=[("Word .docx", "*.docx"), ("Tümü", "*.*")])
         self._bos_sablon = d or None
         try:
@@ -3728,8 +4243,11 @@ class KDVBolmeApp:
         word_tek_dosya = bool(self.word_tek_dosya.get())
         bos_sablon = self._bos_sablon
         devam_sablon = self._devam_sablon
+        ek = {'devam_sablon': devam_sablon, 'takip_klasor': self._takip_klasor,
+              'bos_ymm_sablon': self._bos_ymm_sablon}
         # Word gereken modda şablon klasörü şart; yoksa kullanıcıyı uyar
-        sablon_klasor = self._sablon_klasor if cikti_turu in ('word', 'ikisi') else None
+        sablon_klasor = (self._sablon_klasor
+                         if cikti_turu in ('word', 'ikisi', 'firmaya_gore') else None)
         if cikti_turu in ('word', 'ikisi') and not sablon_klasor:
             if cikti_turu == 'word':
                 messagebox.showerror(
@@ -3755,13 +4273,14 @@ class KDVBolmeApp:
             target=self._batch_worker,
             args=(gecerli, esik_tek, esik_toplam, yuzde80, pdf_uret, sablon_klasor,
                   cikti_turu, inceleme_dayanagi, word_tek_dosya, bos_sablon),
-            kwargs={'devam_sablon': devam_sablon},
+            kwargs=ek,
             daemon=True
         ).start()
 
     def _batch_worker(self, dosyalar, esik_tek, esik_toplam, yuzde80, pdf_uret,
                       sablon_klasor=None, cikti_turu='ikisi', inceleme_dayanagi=None,
-                      word_tek_dosya=False, bos_sablon=None, devam_sablon=None):
+                      word_tek_dosya=False, bos_sablon=None, devam_sablon=None,
+                      takip_klasor=None, bos_ymm_sablon=None):
         toplam_b = 0; toplam_h = 0; son_klasor = None
         toplam_sec = 0; toplam_sablonsuz = 0; toplam_gecersiz = 0; son_kapsam = None
         n = len(dosyalar)
@@ -3778,7 +4297,8 @@ class KDVBolmeApp:
                                self._cikis_kok, pdf_uret, sablon_klasor, cikti_turu,
                                inceleme_dayanagi or None,
                                word_tek_dosya=word_tek_dosya, bos_sablon=bos_sablon,
-                               devam_sablon=devam_sablon)
+                               devam_sablon=devam_sablon, takip_klasor=takip_klasor,
+                               bos_ymm_sablon=bos_ymm_sablon)
             except Exception as e:
                 self._log(f"❌ {e}", "err")
                 sonuc.setdefault('h', 1)   # beklenmeyen hata 'firma yok' sanılmasın

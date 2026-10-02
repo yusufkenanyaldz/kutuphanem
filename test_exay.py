@@ -640,6 +640,7 @@ def test_gui_kurulur_ve_callbackler_tanimli():
               "_sablon_ozet", "_kriter_al", "_ilerleme", "_tamam", "_log",
               "_ayar_kaydet", "_birak_guncelle", "_dnd_ayikla",
               "_dosya_sec", "_olustur_tikla", "_segment_sec", "_kapsam_kaydir",
+              "_takip_klasoru_sec", "_takip_ozet", "_bos_ymm_sablon_sec", "_bos_ymm_ozet",
               "_log_ac_kapa", "_metrik_guncelle", "_word_blok_guncelle"]:
         assert callable(getattr(app, m)), f"Eksik/çağrılamaz metot: {m}"
 
@@ -2226,3 +2227,196 @@ def test_word_baslatilamazsa_bos_sonuc_ve_uyari(tmp_path, monkeypatch):
     loglar = []
     assert exay._doclari_docx_cevir([doc], lambda m, t='': loglar.append(m)) == {}
     assert any("Word başlatılamadı" in m for m in loglar)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Firma takip dosyası (geçmişten SMMM/YMM/telefon/adres taşıma) + firmaya göre tür
+# ══════════════════════════════════════════════════════════════════════════
+def _eski_takip_yaz(yol, satirlar, tur_sutunu=False):
+    """Kullanıcının gerçek takip dosyası düzeni: 1. satır boş, A sütunu boş,
+    başlık 2. satırda ('FİRMA ' sonda boşluklu), en altta toplam satırı."""
+    bas = ['SR', 'FİRMA ', 'KDV', 'BELGE ID', 'AÇIKLAMA', 'SMMM', 'YMM', 'TELEFONU',
+           'ADRESİ', 'DURUM'] + (['TÜR'] if tur_sutunu else [])
+    wb = openpyxl.Workbook(); ws = wb.active
+    for c, b in enumerate(bas, 2):
+        ws.cell(2, c, value=b)
+    for r, s in enumerate(satirlar, 3):
+        for c, b in enumerate(bas, 2):
+            v = s.get(b.strip())
+            if v is not None:
+                ws.cell(r, c, value=v)
+    ws.cell(3 + len(satirlar), 4, value=sum(s.get('KDV', 0) for s in satirlar))
+    Path(yol).parent.mkdir(parents=True, exist_ok=True)
+    wb.save(yol)
+
+
+def test_takip_dosyasi_eski_bicim_tur_cikarimi(tmp_path):
+    """TÜR sütunu yoksa: YMM dolu → YMM; BELGE ID dolu ya da 'sistem' → EXCEL; diğer → KİT
+    (gerçek Ağustos 2026 dosyasında 24 Excel / 3 KİT ile birebir doğrulandı)."""
+    yol = tmp_path / "01 FİRMA VE MUH. BİLGİLERİ AĞUSTOS 2026.xlsx"
+    _eski_takip_yaz(yol, [
+        {'SR': 1, 'FİRMA': 'ATAKAŞ ÇELİK A.Ş.', 'KDV': 10, 'YMM': 'MEHMET AKINCI'},
+        {'SR': 2, 'FİRMA': 'AY PROFİL LTD. ŞTİ.', 'KDV': 9, 'BELGE ID': '01a0f245190871d5'},
+        {'SR': 3, 'FİRMA': 'TEKİZ BAĞLANTI', 'KDV': 8, 'AÇIKLAMA': 'SİSTEMDEN GÖNDERİLECEK'},
+        {'SR': 4, 'FİRMA': 'BARSA YALITIM', 'KDV': 7, 'AÇIKLAMA': 'FİRMA TUTANAK',
+         'TELEFONU': '0 212 611 99 00'},
+    ])
+    k = exay.takip_dosyasi_oku(str(yol))
+    assert [x['TÜR'] for x in k] == ['YMM', 'EXCEL', 'EXCEL', 'KİT']   # toplam satırı yok
+    assert k[3]['TELEFONU'] == '0 212 611 99 00' and k[0]['FİRMA'] == 'ATAKAŞ ÇELİK A.Ş.'
+
+
+@pytest.mark.parametrize("girdi, beklenen", [
+    ("Excel", "EXCEL"), ("sistemden", "EXCEL"), ("K.İ.T.", "KİT"), ("kit", "KİT"),
+    ("Word", "KİT"), ("YMM yazısı", "YMM"), ("ithalat", "İTHALAT"), ("", None), ("?", None)])
+def test_tur_normalize(girdi, beklenen):
+    assert exay.tur_normalize(girdi) == beklenen
+
+
+def test_unvan_eslesme_kirpilmis_ve_bicim_farki():
+    a = exay._unvan_anahtari
+    assert a("YILDIZ DEMİR ÇELİK  SAN. A.Ş.") == a("YILDIZ DEMİR ÇELİK SANAYİ A.Ş")
+    assert exay._unvan_eslesir(a("KUTAY IŞIL İNŞAAT DEK. EML. HRF. OTOM. İTH. İHR. S"),
+                               a("KUTAY IŞIL İNŞAAT DEK. EML. HRF. OTOM. İTH. İHR. SAN. TİC. A.Ş."))
+    assert not exay._unvan_eslesir(a("EVYAPAN DEMİR SAN.VE TİC.LTD.ŞTİ."),
+                                   a("EVYAPAN PETROL ÜR. DAĞ. PAZ. İNŞAAT SAN. VE TİC."))
+    assert not exay._unvan_eslesir(a("ABC A.Ş."), a("ABC DEF GHİ A.Ş."))   # kısa önek yetmez
+
+
+def test_ad_donemi():
+    assert exay._ad_donemi("01 FİRMA VE MUH. BİLGİLERİ AĞUSTOS 2026") == (2026, 8)
+    assert exay._ad_donemi("firma bilgileri 09.2026") == (2026, 9)
+    assert exay._ad_donemi("FİRMA BİLGİLERİ") is None
+
+
+def test_takip_gecmisi_en_yeni_dolu_deger_ve_tur(tmp_path):
+    """Eskiden yeniye: her alan için EN YENİ dolu değer; TÜR en yeni dosyadan
+    (açık TÜR sütunu, çıkarımı ezer); VKN sütunu varsa ünvandan önce gelir."""
+    _eski_takip_yaz(tmp_path / "TEMMUZ" / "01 FİRMA VE MUH. BİLGİLERİ TEMMUZ 2026.xlsx", [
+        {'FİRMA': 'FIRMA A LTD. ŞTİ.', 'SMMM': 'ESKİ SMMM', 'TELEFONU': '111',
+         'BELGE ID': 'x1'}])
+    _eski_takip_yaz(tmp_path / "AGUSTOS" / "01 FİRMA VE MUH. BİLGİLERİ AĞUSTOS 2026.xlsx", [
+        {'FİRMA': 'FIRMA A', 'SMMM': 'YENİ SMMM', 'BELGE ID': 'x2', 'TÜR': 'KİT'}],
+        tur_sutunu=True)
+    dosyalar = exay.takip_dosyalarini_bul([tmp_path])
+    assert len(dosyalar) == 2
+    gecmis = exay.takip_gecmisi_oku(dosyalar)
+    assert gecmis[0][0].name.endswith("TEMMUZ 2026.xlsx")             # eskiden yeniye
+    es = exay.takip_bilgisi_esle([("1000000001", "FIRMA A"), ("1000000009", "BAŞKA")], gecmis)
+    a = es["1000000001"]
+    assert a['alanlar']['SMMM'] == 'YENİ SMMM'          # yeni değer ezer
+    assert a['alanlar']['TELEFONU'] == '111'            # yenide boş → eskisi kalır
+    assert a['tur'] == 'KİT'                            # açık TÜR, BELGE ID çıkarımını ezer
+    assert es["1000000009"]['kaynak'] is None
+
+
+def _takipli_ortam(tmp_path):
+    """2026/03 MART (geçmiş takip dosyası) + 2026/04 NİSAN (liste) + şablonlar.
+    Seçilen: FIRMA B (1000000002, 600K), FIRMA A (1000000001), FIRMA C (1000000003)."""
+    kok = tmp_path / "2026"
+    liste = kok / "04 NİSAN" / "NISAN_2026.xlsx"
+    liste.parent.mkdir(parents=True)
+    kols = ["Alış Faturasının Tarihi", "Alış Faturasının Serisi", "Alış Faturasının Sıra No'su",
+            "Alış Faturasının KDV Hariç Tutarı", "KDV si", "Satıcının Adı-Soyadı / Ünvanı",
+            "Satıcının Vergi Kimlik Numarası"]
+    pd.DataFrame([
+        ("2026-04-01", "A", "BBK1", 200000, 36000, "FIRMA A", "1000000001"),
+        ("2026-04-02", "A", "BBK2", 300000, 54000, "FIRMA B", "1000000002"),
+        ("2026-04-03", "A", "BBK3", 300000, 54000, "FIRMA B", "1000000002"),
+        ("2026-04-04", "A", "BBK4", 160000, 18000, "FIRMA C", "1000000003"),  # tek ≥150K
+        ("2026-04-05", "A", "BBK5",  50000,  9000, "FIRMA D", "1000000004"),
+    ], columns=kols).to_excel(liste, index=False)
+    _eski_takip_yaz(kok / "03 MART" / "01 FİRMA VE MUH. BİLGİLERİ MART 2026.xlsx", [
+        {'SR': 1, 'FİRMA': 'FIRMA B LTD. ŞTİ.', 'BELGE ID': '01a0f2', 'SMMM': 'AHMET YILMAZ'},
+        {'SR': 2, 'FİRMA': 'FIRMA A', 'YMM': 'HALUK ERDEM', 'AÇIKLAMA': 'a@b.com',
+         'DURUM': "30.03.2026'DA KARGOYA VERİLDİ."},
+        {'SR': 3, 'FİRMA': 'FIRMA C', 'TELEFONU': '0 342 000 00 00'},
+    ])
+    sk = tmp_path / "sablonlar"; sk.mkdir()
+    _ymm_yazi_docx_yaz(sk / "ymm_a.docx", "FIRMA A", "V.D. 1000000001")
+    _docx_sablon_yaz(sk / "kit_c.docx", "FIRMA C", "V.D. 1000000003")
+    return liste, sk
+
+
+def test_firmaya_gore_her_firmaya_yalniz_kendi_belgesi(tmp_path):
+    import docx
+    liste, sk = _takipli_ortam(tmp_path)
+    loglar = []
+    exay.dosyalari_isle(str(liste), 150000, 450000, 80, lambda m, t='': loglar.append(m),
+                        lambda *a: None, sablon_klasor=str(sk), cikti_turu='firmaya_gore')
+    kl = liste.parent / "Hazır Tutanaklar"
+    adlar = sorted(p.name for p in kl.iterdir())
+    assert "1) 04_2026_1000000002_FIRMA B.xlsx" in adlar          # B → EXCEL (BELGE ID)
+    assert "2) YMM FIRMA A 04-2026.docx" in adlar                  # A → YMM yazısı
+    assert "3) FIRMA C 04-2026.docx" in adlar                      # C → KİT
+    assert not any(a.startswith(("2) 04_2026", "3) 04_2026")) for a in adlar)   # Excel YOK
+    assert not any(a.startswith("1) ") and a.endswith(".docx") for a in adlar)  # B'ye Word YOK
+    assert any("Belge türü: 1 Excel, 1 KİT, 1 YMM" in m for m in loglar)
+    # Ayın takip dosyası: bilgiler taşındı, TÜR yazıldı, DURUM/BELGE ID taşınmadı
+    wb = openpyxl.load_workbook(kl / "01 FİRMA VE MUH. BİLGİLERİ NİSAN 2026.xlsx")
+    ws = wb.active
+    bas = [c.value for c in ws[1]]
+    assert bas == exay.TAKIP_SUTUNLAR
+    sat = {r[1]: dict(zip(bas, r)) for r in ws.iter_rows(min_row=2, values_only=True) if r[2]}
+    assert sat["FIRMA B"]['SR'] == 1 and sat["FIRMA B"]['TÜR'] == 'EXCEL'
+    assert sat["FIRMA B"]['SMMM'] == 'AHMET YILMAZ' and sat["FIRMA B"]['VKN'] == '1000000002'
+    assert not sat["FIRMA B"]['BELGE ID']
+    assert sat["FIRMA A"]['TÜR'] == 'YMM' and sat["FIRMA A"]['YMM'] == 'HALUK ERDEM'
+    assert sat["FIRMA A"]['AÇIKLAMA'] == 'a@b.com' and not sat["FIRMA A"]['DURUM']
+    assert sat["FIRMA C"]['TÜR'] == 'KİT' and sat["FIRMA C"]['TELEFONU'] == '0 342 000 00 00'
+    assert sat["FIRMA B"]['KDV'] == pytest.approx(108000)           # 54.000 × 2
+    son = ws.max_row
+    assert ws.cell(son, 2).value == 'TOPLAM'
+    assert ws.cell(son, 4).value == pytest.approx(108000 + 36000 + 18000)
+
+
+def test_firmaya_gore_sablonu_yoksa_excel_ve_uyari(tmp_path):
+    liste, sk = _takipli_ortam(tmp_path)
+    (sk / "kit_c.docx").unlink()                                   # C'nin KİT şablonu yok
+    loglar = []
+    exay.dosyalari_isle(str(liste), 150000, 450000, 80, lambda m, t='': loglar.append(m),
+                        lambda *a: None, sablon_klasor=str(sk), cikti_turu='firmaya_gore')
+    adlar = [p.name for p in (liste.parent / "Hazır Tutanaklar").iterdir()]
+    assert "3) 04_2026_1000000003_FIRMA C.xlsx" in adlar
+    assert any("o türde şablonu yok" in m for m in loglar)
+
+
+def test_firmaya_gore_bos_kit_sablonu_kullanilir(tmp_path):
+    import docx
+    liste, sk = _takipli_ortam(tmp_path)
+    (sk / "kit_c.docx").unlink()
+    bos = tmp_path / "BOŞ KİT ŞABLONU.docx"
+    _docx_sablon_yaz(bos, "", "")
+    exay.dosyalari_isle(str(liste), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        sablon_klasor=str(sk), cikti_turu='firmaya_gore', bos_sablon=str(bos))
+    yol = liste.parent / "Hazır Tutanaklar" / "3) FIRMA C 04-2026 BOŞ.docx"
+    assert yol.exists()
+    metin = "\n".join(c.text for t in docx.Document(str(yol)).tables for r in t.rows for c in r.cells)
+    assert "1000000003" in metin                                  # VKN NEZDİNDE'ye yazıldı
+
+
+def test_takip_dosyasi_yeni_firma_sari_ve_tur_listesi(tmp_path):
+    satirlar = [{'SR': 1, 'FİRMA': 'X', 'VKN': '0012345678', 'KDV': 5.5, 'TÜR': 'EXCEL',
+                 'yeni': True},
+                {'SR': '', 'FİRMA': 'RHEINZINK', 'KDV': 2, 'TÜR': 'İTHALAT'}]
+    yol = exay.firma_takip_dosyasi_yaz(str(tmp_path / exay.takip_dosyasi_adi("08.2026")),
+                                       satirlar, "08.2026")
+    assert Path(yol).name == "01 FİRMA VE MUH. BİLGİLERİ AĞUSTOS 2026.xlsx"
+    ws = openpyxl.load_workbook(yol).active
+    assert ws.title == "AĞUSTOS 2026"
+    assert ws['C2'].value == '0012345678' and ws['C2'].number_format == '@'   # baştaki 0
+    assert ws['B2'].fill.fgColor.rgb.endswith('FFF2CC') and not ws['B3'].fill.fgColor.rgb.endswith('FFF2CC')
+    assert 'EXCEL,KİT,YMM' in ws.data_validations.dataValidation[0].formula1
+    # Üretilen dosya bir sonraki ay geçmiş olarak okunabilir (VKN + TÜR sütunlu)
+    k = exay.takip_dosyasi_oku(yol)
+    assert k[0]['VKN'] == '0012345678' and k[0]['TÜR'] == 'EXCEL' and k[1]['TÜR'] == 'İTHALAT'
+
+
+def test_takip_aramasi_cikti_disi_klasorleri_atlar(tmp_path):
+    (tmp_path / "AppData").mkdir()
+    _eski_takip_yaz(tmp_path / "AppData" / "FİRMA BİLGİLERİ.xlsx", [{'FİRMA': 'X'}])
+    _eski_takip_yaz(tmp_path / "a" / "b" / "c" / "d" / "FİRMA BİLGİLERİ.xlsx", [{'FİRMA': 'X'}])
+    _eski_takip_yaz(tmp_path / "a" / "FİRMA BİLGİLERİ.xlsx", [{'FİRMA': 'X'}])
+    (tmp_path / "a" / "~$FİRMA BİLGİLERİ.xlsx").write_bytes(b"kilit")
+    bulunan = exay.takip_dosyalarini_bul([tmp_path])
+    assert [p.relative_to(tmp_path).as_posix() for p in bulunan] == ["a/FİRMA BİLGİLERİ.xlsx"]
