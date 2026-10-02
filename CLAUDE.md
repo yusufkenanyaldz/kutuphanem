@@ -222,7 +222,7 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 yöntemini otomatikleştirir). Çalıştırma:
 
 ```bash
-pytest -q        # 136 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
+pytest -q        # 138 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
                  # VKN normalizasyon, üç liste tipi (yeni/eski GİB + muhasebe),
                  # CSV okuma, kriter doğrulama, doğruluk uyarıları (kdv/mükerrer/
                  # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca,
@@ -245,7 +245,10 @@ test et. Bilinen gerçek dosyalarda beklenen gerçek kapsamlar:
 Nisan %94.2, Ocak %82.2, Muhasebe %82.4, **Ağustos 2026 (yeni GİB formatı,
 2 sayfalı .xls, etiketsiz toplam satırlı) → 656 fatura, 39 firma, %92.2**.
 Bu dosyada program çıktısı kullanıcının Excel tutanaklarıyla ve BARSA Word
-tutanağının fatura tablosuyla birebir aynı çıktı. Gerçek müşteri dosyaları
+tutanağının fatura tablosuyla birebir aynı çıktı. Aynı ayın **YMM 08.2026.doc**
+birleşik dosyası (14 Bilgi İsteme yazısı, .docx'e çevrilerek) şablon klasörü
+yapıldığında seçilen 39 firmadan 13'ü eşleşti ve 13 yazının fatura tablosu
+kullanıcının elle hazırladığıyla birebir aynı çıktı. Gerçek müşteri dosyaları
 (VKN/ünvan içerir) DEPOYA KONMAZ; testler bunların düzenini sentetik taklit eder
 (`_gib_yeni_bicim_yaz`).
 
@@ -273,7 +276,7 @@ tutanağının fatura tablosuyla birebir aynı çıktı. Gerçek müşteri dosya
 - Geçersiz kimlikli satırlar tutanaklanamaz; kullanıcı kaynak listede
   düzeltirse kapsam iyileşir (program uyarıyor).
 - ~~GUI'de ilerleme çubuğu yok~~ → **eklendi** (firma sayısına göre dolar).
-- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 136 test).
+- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 138 test).
 - ~~İşlem öncesi önizleme/uyarı yok~~ → **eklendi** (ÖN BİLGİ bloğu + KDV
   tutarlılık, mükerrer fatura, dönem-dışı tarih uyarıları — hepsi yalnızca
   uyarır, seçimi/iş kuralını etkilemez).
@@ -313,6 +316,13 @@ tutanağının fatura tablosuyla birebir aynı çıktı. Gerçek müşteri dosya
   `_blok_vkn`) ve fatura doldurma (konumsal + `_fatura_son_sutun_dahil`) ikisini
   de tanır; blok bölme (`_docx_firma_bloklari`, `_metni_bloklara_ayir`) her iki
   başlığı da blok başı sayar, karşı-taraf tablosunu her iki başlıktan bulur.
+  **Gerçek YMM yazısında fatura tablosu 6 sütundur** (F.TARİHİ | F. NOSU | MALIN
+  CİNSİ | MALIN MİKTARI | MATRAH | KDV; 'KDV dahil' sütunu yok) — 6 ve 7 sütun
+  geçerli sayılır (`_FATURA_SUTUN_GECERLI`), yanlış uyarı verilmez. Birleşik
+  dosyada yazılar ~30 boş satırla ayrıldığından izole edilen bloğun sonundaki boş
+  paragraflar silinir (`_sondaki_bos_paragraflari_sil`; yoksa her çıktıda boş 2.
+  sayfa oluşuyordu). Word'süz bilgisayarda birleşik `.doc` "bozuk" değil
+  "Word gerekli" diye raporlanır (`_birlesik_doc_mu`).
 - **Çok-firmalı tek `.docx` şablon:** Bir dosyada birçok firmanın tutanağı/yazısı
   toplanmışsa (her blok "KATMA DEĞER…TUTANAĞI" ya da "Konu: Bilgi İsteme"
   başlığıyla), program dosyayı bloklara ayırıp her firmayı VKN ile ayrı indeksler;

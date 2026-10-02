@@ -1419,12 +1419,16 @@ def sablonlari_indeksle(klasor, log_cb=None):
                "(pip install python-docx).", "warn")
     coklu = 0
     vknsiz = []                            # okunamayan / karşı firma VKN'si bulunamayan
+    wordsuz = []                           # birleşik .doc — bölmek için Word gerekli
     for p in dosyalar:
         if p.name.startswith('~$'):        # Word geçici dosyaları
             continue
         kayitlar = _sablon_kayitlari(str(p))
         if not kayitlar:
-            vknsiz.append(p.name)
+            if p.suffix.lower() == '.doc' and not word_destekli() and _birlesik_doc_mu(p):
+                wordsuz.append(p.name)
+            else:
+                vknsiz.append(p.name)
         if len(kayitlar) > 1:
             coklu += 1
         for vkn, unvan, blok, yol in kayitlar:
@@ -1435,6 +1439,10 @@ def sablonlari_indeksle(klasor, log_cb=None):
     if coklu and log_cb:
         log_cb(f"  🧩 {coklu} dosya çok-firmalı (tek Word'de birden çok tutanak) "
                f"olarak tanındı; her firma ayrı ayrı eşleştirildi.", "info")
+    if wordsuz and log_cb:
+        log_cb(f"  ⚠️  {len(wordsuz)} .doc dosyasında birden çok tutanak/yazı var; bunları "
+               f"bölmek için bilgisayarda Microsoft Word kurulu olmalı. Word yoksa dosyayı "
+               f"Word'de açıp .docx olarak kaydedin: {', '.join(wordsuz[:5])}", "warn")
     if vknsiz and log_cb:
         # Sessiz kalmasın: kullanıcı 'şablon yok' görünen firmanın nedenini bilsin.
         log_cb(f"  ⚠️  {len(vknsiz)} Word dosyasında karşı firma VKN'si okunamadı "
@@ -1445,6 +1453,13 @@ def sablonlari_indeksle(klasor, log_cb=None):
         if len(vknsiz) > 10:
             log_cb(f"     … ve {len(vknsiz)-10} dosya daha", "warn")
     return idx
+
+def _birlesik_doc_mu(path):
+    """Eski ikili .doc birden çok tutanak/yazı içeriyor mu (okunamazsa False)?"""
+    try:
+        return len(_metni_bloklara_ayir(_doc_metni_oku(str(path)))) > 1
+    except Exception:
+        return False
 
 def word_destekli():
     """Word otomasyonu (pywin32 + Windows Word) kullanılabilir mi?"""
@@ -1459,6 +1474,9 @@ def word_destekli():
 #  Bu yüzden doldurma KONUMSAL yapılır (başlık-rol tahmini değil). Son sütun tipe
 #  göre: tutanak 'Defter Kayıt' → BOŞ; YMM yazısı 'KDV dahil toplam' → matrah+kdv.
 _FATURA_SUTUN_SAYISI = 7   # beklenen fatura tablosu sütun sayısı (denetim için)
+# Gerçek YMM (Bilgi İsteme) yazılarında son sütun yoktur (F.TARİHİ|F. NOSU|CİNS|MİKTAR|
+# MATRAH|KDV = 6 sütun); tutanakta 7. sütun 'Defter Kayıt'. İkisi de geçerlidir.
+_FATURA_SUTUN_GECERLI = (6, 7)
 
 def _fatura_kaynak_kolonlari(kolonlar):
     """Kaynak listedeki fatura sütunlarını BİR KEZ çözer (rol → sütun adı); firma
@@ -1620,9 +1638,9 @@ def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
         # Denetim: veri satırı beklenen sütun sayısında değilse uyar (sessiz kalma).
         try:
             veri_ncol = hedef_tablo.Rows(veri_bas).Cells.Count
-            if veri_ncol != _FATURA_SUTUN_SAYISI:
+            if veri_ncol not in _FATURA_SUTUN_GECERLI:
                 _yaz(f"      ⚠️ Fatura tablosu {veri_ncol} sütun (beklenen "
-                     f"{_FATURA_SUTUN_SAYISI}); çıktıyı kontrol edin.", "warn")
+                     f"6 ya da 7); çıktıyı kontrol edin.", "warn")
         except Exception:
             pass
 
@@ -1852,7 +1870,26 @@ def _docx_blok_belgesi(kaynak_yol, blok_index):
     for el in list(body):
         if el.tag in (qn('w:p'), qn('w:tbl')) and id(el) not in tut:
             body.remove(el)
+    _sondaki_bos_paragraflari_sil(doc)
     return doc
+
+def _sondaki_bos_paragraflari_sil(doc):
+    """Gövdenin SONUNDAKİ boş paragrafları siler (yazı, resim ya da alan içermeyen).
+    Birleşik dosyalarda mektuplar/tutanaklar ~30 boş satırla ayrılıyor; izole edilen
+    blokta bunlar kalınca her çıktıya BOŞ İKİNCİ SAYFA ekleniyordu (gerçek YMM
+    08.2026 dosyası). Silinen paragraf sayısını döndürür."""
+    from docx.oxml.ns import qn
+    body = doc.element.body
+    silinen = 0
+    for el in reversed([e for e in body if e.tag in (qn('w:p'), qn('w:tbl'))]):
+        if el.tag != qn('w:p') or ''.join(el.itertext()).strip():
+            break
+        if el.find('.//' + qn('w:drawing')) is not None or el.find('.//' + qn('w:pict')) is not None \
+                or el.find('.//' + qn('w:sectPr')) is not None:
+            break   # resim/şekil ya da bölüm sonu taşıyan paragrafa dokunma
+        body.remove(el)
+        silinen += 1
+    return silinen
 
 def _docx_fatura_doldur(doc, firma_df, tum_kolonlar, inceleme_dayanagi=None, log_cb=None):
     """Verilen (tek-firmalık) docx belgesindeki fatura tablosunun veri satırlarını
@@ -1892,9 +1929,9 @@ def _docx_fatura_doldur(doc, firma_df, tum_kolonlar, inceleme_dayanagi=None, log
     try:
         ref_satir = hedef.rows[veri_bas] if len(hedef.rows) > veri_bas else hedef.rows[veri_bas-1]
         veri_ncol = len(ref_satir.cells)
-        if veri_ncol != _FATURA_SUTUN_SAYISI and log_cb:
+        if veri_ncol not in _FATURA_SUTUN_GECERLI and log_cb:
             log_cb(f"      ⚠️ Fatura tablosu {veri_ncol} sütun (beklenen "
-                   f"{_FATURA_SUTUN_SAYISI}); çıktıyı kontrol edin.", "warn")
+                   f"6 ya da 7); çıktıyı kontrol edin.", "warn")
     except Exception:
         pass
 

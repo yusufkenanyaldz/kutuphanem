@@ -1694,3 +1694,69 @@ def test_kriter_tutari_oku(girdi, beklenen):
 def test_kriter_tutari_oku_hatali():
     with pytest.raises(ValueError):
         exay.kriter_tutari_oku("yüz elli bin")
+
+
+def _ymm_birlesik_bosluklu_yaz(yol, firmalar, bos_satir=30):
+    """Gerçek 'YMM 08.2026' düzeni: her mektup 'Sayı:'/'Konu: Bilgi İsteme' ile başlar,
+    fatura tablosu 6 sütundur (F.TARİHİ…KDV) ve mektuplar ~30 BOŞ paragrafla ayrılır."""
+    import docx
+    d = docx.Document()
+    for unvan, vd in firmalar:
+        d.add_paragraph("Sayı: YMM 27103572/2026-2209          GAZİANTEP")
+        d.add_paragraph("Konu: Bilgi İsteme          30.09.2026")
+        t = d.add_table(rows=0, cols=2)
+        for a, b in [("İADE TALEBİNDE BULUNAN FİRMANIN", "İADE TALEBİNDE BULUNAN FİRMANIN"),
+                     ("Ünvanı", "ESKA METAL SAN. TİC. A.Ş."),
+                     ("Vergi Dairesi/Nosu", "ŞEHİTKAMİL / 380 119 8516"),
+                     ("HAKKINDA BİLGİ İSTENİLEN MÜKELLEFİN", "HAKKINDA BİLGİ İSTENİLEN MÜKELLEFİN"),
+                     ("Ünvanı", unvan), ("Vergi Dairesi/Nosu", vd),
+                     ("İNCELEME DAYANAĞI", "04.03.2026 Tarih ve 46 Sayılı")]:
+            r = t.add_row().cells; r[0].text = a; r[1].text = b
+        f = d.add_table(rows=2, cols=6)
+        for c, v in enumerate(["F.TARİHİ", "F. NOSU", "MALIN CİNSİ", "MALIN MİKTARI", "MATRAH", "KDV"]):
+            f.rows[0].cells[c].text = v
+        d.add_paragraph("SABRİ HAMAMCI")
+        for _ in range(bos_satir):
+            d.add_paragraph("")
+    d.save(yol)
+
+
+def test_ymm_birlesik_blok_sondaki_bos_satirlar_silinir_ve_6_sutun_uyarmaz(tmp_path):
+    """GERÇEK (YMM 08.2026): mektuplar 30 boş satırla ayrılıyor → izole edilen her
+    yazıda boş 2. sayfa çıkıyordu; ayrıca 6 sütunlu (gerçek) YMM tablosu için her
+    seferinde yanlış 'beklenen 7 sütun' uyarısı veriliyordu."""
+    import docx
+    from docx.oxml.ns import qn
+    yol = tmp_path / "YMM 08.2026.docx"
+    _ymm_birlesik_bosluklu_yaz(yol, [("ATAKAŞ ÇELİK SAN. VE TİC. A.Ş.", "DÖRTYOL V.D. / 095 030 3776"),
+                                     ("TEZCAN GALVANİZLİ A.Ş.", "BEYKOZ V.D. / 841 005 2600")])
+    kay = exay._sablon_kayitlari(str(yol))
+    assert [k[0] for k in kay] == ["0950303776", "8410052600"]
+    d = exay._docx_blok_belgesi(str(yol), 0)
+    from docx.text.paragraph import Paragraph
+    son = [el for el in d.element.body if el.tag in (qn('w:p'), qn('w:tbl'))][-1]
+    assert Paragraph(son, d).text.strip() == "SABRİ HAMAMCI"         # sonda boş satır yok
+    uyarilar = []
+    out = tmp_path / "o.docx"
+    firma, kols = _ornek_firma_df()
+    exay.firma_docx_olustur(str(yol), firma, str(out), kols,
+                            log_cb=lambda m, t='': uyarilar.append(m), blok=0)
+    assert not [u for u in uyarilar if "sütun" in u]                  # 6 sütun geçerli
+    tablo = docx.Document(out).tables[-1]
+    assert len(tablo.columns) == 6 and len(tablo.rows) > 1
+
+
+def test_birlesik_doc_word_yoksa_net_mesaj(tmp_path, monkeypatch):
+    """Birleşik .doc'u bölmek Word ister; Word yoksa 'bozuk/şifreli' değil
+    'Word gerekli' denmeli."""
+    p = tmp_path / "YMM 08.2026.doc"; p.write_bytes(b"stub")
+    iki = ("Sayı: YMM 1\nKonu: Bilgi İsteme\nHakkında Bilgi İstenilen Mükellefin\tÜnvanı\tA A.Ş.\t"
+           "Vergi Dairesi/Nosu\tX V.D. / 123 456 7890\n"
+           "Sayı: YMM 2\nKonu: Bilgi İsteme\nHakkında Bilgi İstenilen Mükellefin\tÜnvanı\tB A.Ş.\t"
+           "Vergi Dairesi/Nosu\tY V.D. / 223 456 7890\n")
+    monkeypatch.setattr(exay, "_doc_metni_oku", lambda path: iki)
+    monkeypatch.setattr(exay, "word_destekli", lambda: False)
+    loglar = []
+    exay.sablonlari_indeksle(str(tmp_path), lambda m, t='': loglar.append(m))
+    metin = "\n".join(loglar)
+    assert "Word kurulu olmalı" in metin and "bozuk" not in metin
