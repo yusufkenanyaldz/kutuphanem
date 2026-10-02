@@ -178,7 +178,11 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `_docx_firma_bloklari` / `_docx_blok_belgesi` / `_sablon_kayitlari` | Birleşik `.docx`'i firma bloklarına ayırır (blok başı = "KATMA DEĞER…TUTANAĞI" başlığı), tek bloğu izole eder, dosyadaki tüm (vkn, unvan, blok) kayıtlarını verir. |
 | `_docx_govde_ekle` / `firmalar_tek_docx` | Doldurulmuş firma docx'lerini tek dosyada (her firma yeni sayfada) birleştirir. Kopyalanan gövdedeki resim/dış bağlantı rId'leri hedef belgeye taşınır (farklı şablonların logosu/imzası bozuk ya da yanlış çıkmasın). |
 | `firma_docx_olustur` / `docx_destekli` | `.docx` şablonu python-docx ile açıp fatura tablosunu doldurur, yeni `.docx` yazar (**Word gerektirmez**). |
-| `firma_word_olustur` / `word_destekli` | Eski `.doc` şablonu Word (COM) ile açıp fatura tablosunu günceller (Windows + Word). Konumsal doldurur (aşağıya bakın). |
+| `firma_word_olustur` / `word_destekli` | Eski `.doc` şablonu Word (COM) ile açıp fatura tablosunu günceller (Windows + Word). Konumsal doldurur (aşağıya bakın). Artık yalnız YEDEK yol: `.doc` şablonlar indekslenirken `.docx`'e çevrilir. |
+| `_doclari_docx_cevir` / `_doc_docx_cevir` / `_com_hazirla` | `.doc` şablonları TEK Word örneğiyle `.docx`'e çevirir (`~/.exay_onbellek`, yol+mtime+boyut anahtarlı önbellek; şablon değişmedikçe yeniden çevrilmez). Böylece `.doc` şablonlar da test edilmiş `.docx` yolundan (devam sayfası, tarih, kalın olmayan satır, tarih sırası) üretilir. Word yoksa `{}` + uyarı. `_com_hazirla`: GUI işi ayrı thread'de çalıştığından her Word çağrısından önce `pythoncom.CoInitialize()` (yoksa aynı oturumda 2. çalıştırmada "CoInitialize has not been called"). |
+| `devam_sayfasi_hazirla` / `_devam_aylarini_yaz` | KİT devam sayfası şablonunu (.doc→docx çevrilerek) açar; 'AY / YYYY' başlıklarını dönemin bir önceki ayı + dönem ayı yapar (01.2027 → 'ARALIK / 2026' \| 'OCAK / 2027'). |
+| `_docx_bolum_olarak_ekle` / `_normal_bicimini_sabitle` / `_temel_bicim` / `_docx_kopya` | Bir belgeyi YENİ BÖLÜM olarak ekler (dikey KİT + yatay devam ayrı korunur). Stiller `docxcompose` ile (ada göre) taşınır — yoksa yalnız gövde. Kaynağın 'Normal' yazı tipi/boyut/aralığı hedefinkinden farklıysa doğrudan biçime çevrilir (gerçek hata: devam KİT'in Cambria'sıyla taşıp boş sayfa oluşturuyordu). Her firmaya devamın taze kopyası verilir. |
+| `_docx_yazi_tarihi_yaz` | YMM Bilgi İsteme yazısında yalnız 'Konu … Bilgi İsteme … TARİH' satırındaki tarihi ÇIKTI GÜNÜ yapar (`??.??.????` yer tutucusu dahil). Sayıyı kullanıcı yazar; İnceleme Dayanağı/fatura tarihleri değişmez; KİT'e dokunmaz. |
 | `firma_word_uret` / `sablon_uretilebilir_mi` | Uzantıya göre doğru üreticiyi seçer (.docx→python-docx, .doc→COM); ön koşulu denetler. `inceleme_dayanagi` geçirir. |
 | `_docx_inceleme_dayanagi_yaz` | Tutanaktaki "İNCELEME DAYANAĞI" (sözleşme) değer hücresini günceller — eski şablonun eski yılını otomatik ezer. |
 | `_docx_metni_oku` | `.docx` metnini (paragraf + tablo hücreleri, sekmeli) çıkarır — VKN okuma için. |
@@ -202,7 +206,8 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 
 - Python 3, bağımlılıklar: `pandas`, `openpyxl`, `xlrd` (eski `.xls` için),
   `pillow` (logo), `olefile` (`.doc` şablon okuma), `python-docx` (`.docx` şablon
-  okuma+yazma). **Opsiyonel:** `reportlab` (PDF kopya), `pywin32` (yalnızca eski
+  okuma+yazma), `docxcompose` (devam sayfası/tek dosya birleştirmede stil taşıma;
+  yoksa birleştirme yine çalışır, yalnız eksik stiller Normal'e düşer). **Opsiyonel:** `reportlab` (PDF kopya), `pywin32` (yalnızca eski
   `.doc` şablonlardan üretim — Windows + Word; `.docx` şablonlar Word'süz üretilir).
   Tkinter standart kütüphanede. Testler için: `pytest`.
 - **Sürümler `requirements.txt`'te ARALIKLA sabit** (`>=test edilmiş, <sonraki ana
@@ -228,7 +233,7 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 yöntemini otomatikleştirir). Çalıştırma:
 
 ```bash
-pytest -q        # 146 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
+pytest -q        # 162 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
                  # VKN normalizasyon, üç liste tipi (yeni/eski GİB + muhasebe),
                  # CSV okuma, kriter doğrulama, doğruluk uyarıları (kdv/mükerrer/
                  # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca,
@@ -283,7 +288,7 @@ kullanıcının elle hazırladığıyla birebir aynı çıktı. Gerçek müşter
 - Geçersiz kimlikli satırlar tutanaklanamaz; kullanıcı kaynak listede
   düzeltirse kapsam iyileşir (program uyarıyor).
 - ~~GUI'de ilerleme çubuğu yok~~ → **eklendi** (firma sayısına göre dolar).
-- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 146 test).
+- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 162 test).
 - ~~İşlem öncesi önizleme/uyarı yok~~ → **eklendi** (ÖN BİLGİ bloğu + KDV
   tutarlılık, mükerrer fatura, dönem-dışı tarih uyarıları — hepsi yalnızca
   uyarır, seçimi/iş kuralını etkilemez).
@@ -335,8 +340,17 @@ kullanıcının elle hazırladığıyla birebir aynı çıktı. Gerçek müşter
   üretirken ilgili firmanın bloğunu izole edip fatura tablosunu doldurur. **Birleşik `.doc`** (eski ikili)
   ise indeks aşamasında Word (COM) ile bir kez `.docx`'e çevrilir (`_doc_docx_cevir`)
   ve bloklar oradan okunur; böylece üretim tümüyle test edilmiş `.docx` yolundan
-  gider. (Tekli `.doc` COM ile yerinde düzenlenir; birleşik `.doc` dönüştürme adımı
-  Windows + Word gerektirir ve kullanıcı makinesinde doğrulanmalıdır.)
+  gider. Artık **tekli `.doc` da** aynı şekilde (önbellekli) `.docx`'e çevrilip
+  üretilir; COM ile yerinde düzenleme yalnız çevirme başarısız olursa yedektir.
+  (Dönüştürme Windows + Word gerektirir; kullanıcı makinesinde doğrulanmalıdır.)
+- **KİT devam sayfası (`devam_sablon`, GUI: "KİT devam sayfası…"):** gerçek KİT 3
+  sayfadır; exay 1. sayfayı doldurur, kullanıcı her ay 2 yatay devam sayfasının
+  yalnız ay başlıklarını değiştirip her KİT'in arkasına koyuyordu. Şimdi devam
+  şablonu bir kez seçilir; her KİT'in arkasına ayrı (yatay) bölüm olarak, ay
+  başlıkları döneme göre güncellenerek eklenir. YMM yazısına eklenmez. Gerçek
+  dosyalarla (BARSA KİT + devam) LibreOffice'te 3 sayfa (1 dikey + 2 yatay) doğrulandı.
+- **YMM yazısı tarihi:** 'Konu: Bilgi İsteme' satırındaki tarih çıktının alındığı
+  gün olur; Sayı'yı kullanıcı giden evrak defterinden yazar.
 - **Word'leri tek dosyada birleştir (`word_tek_dosya`):** opsiyonel; üretilen
   `.docx` tutanaklar tek dosyada (her firma yeni sayfada) toplanır
   (`KARSIT_INCELEME_TUTANAKLAR_DÖNEM.docx`; `firmalar_tek_docx`).

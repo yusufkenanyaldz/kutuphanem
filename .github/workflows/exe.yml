@@ -38,7 +38,7 @@ jobs:
           IKON=()
           if [ -f logo.ico ]; then IKON=(--icon logo.ico --add-data "logo.ico;."); fi
           pyinstaller --noconfirm --onefile --windowed --name KarsitInceleme "${IKON[@]}" \
-            --collect-data docx --collect-all tkinterdnd2 \
+            --collect-data docx --collect-all docxcompose --collect-all tkinterdnd2 \
             --hidden-import win32com.client exay.py
 
       - uses: actions/upload-artifact@v4

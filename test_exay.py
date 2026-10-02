@@ -9,6 +9,10 @@ GİB, muhasebe/191) sentetik olarak üretilir ve mantık bunlar üzerinde test e
 
 Çalıştırma:  pytest -q
 """
+import importlib.util
+from datetime import datetime
+from pathlib import Path
+
 import openpyxl
 import pandas as pd
 import pytest
@@ -1968,3 +1972,257 @@ def test_ggb_sutunu_yoksa_hicbir_satir_ithalat_sayilmaz():
                        "Alış Faturasının KDV Hariç Tutarı": [1000]})
     yurtici, ithalat = exay.ithalat_satirlarini_ayir(df)
     assert len(yurtici) == 1 and len(ithalat) == 0
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  KİT devam sayfası (her KİT'in arkasına) + YMM yazısı tarihi + .doc→.docx çevirme
+# ══════════════════════════════════════════════════════════════════════════
+def _devam_docx_yaz(yol, font="Times New Roman", aylar=("TEMMUZ / 2026", "AĞUSTOS / 2026")):
+    """Gerçek KİT devam sayfasını taklit eder: YATAY sayfa, 'KDV BEYANNAMESİ
+    BİLGİLERİ | AY / YYYY | AY / YYYY' başlıklı tablo, KİT'te olmayan bir tablo
+    stili ve farklı 'Normal' yazı tipi."""
+    import docx
+    from docx.enum.section import WD_ORIENT
+    from docx.shared import Pt
+    d = docx.Document()
+    d.styles['Normal'].font.name = font
+    d.styles['Normal'].font.size = Pt(10)
+    s = d.sections[0]
+    s.orientation = WD_ORIENT.LANDSCAPE
+    s.page_width, s.page_height = s.page_height, s.page_width
+    d.add_paragraph("FİRMANIN MAL VE/VEYA HİZMET TEDARİKİNDE BULUNDUĞU ALT FİRMALAR")
+    t = d.add_table(rows=2, cols=3)
+    t.style = d.styles['Light Grid Accent 1']          # varsayılan KİT şablonunda yok sayılır
+    for c, v in enumerate(("KDV BEYANNAMESİ BİLGİLERİ",) + tuple(aylar)):
+        t.rows[0].cells[c].text = v
+    t.rows[1].cells[0].text = "TESLİM VE HİZMET TUTARI"
+    d.add_paragraph("Bu tutanak …… tarihinde düzenlendi.")
+    d.save(yol)
+
+
+def _devam_tablo_aylari(doc):
+    t = next(t for t in doc.tables if "KDV BEYANNAMESİ" in t.rows[0].cells[0].text)
+    return [c.text for c in t.rows[0].cells[1:]]
+
+
+@pytest.mark.parametrize("donem, beklenen", [
+    ("01.2027", ["ARALIK / 2026", "OCAK / 2027"]),       # yıl dönümü
+    ("09.2026", ["AĞUSTOS / 2026", "EYLÜL / 2026"]),
+])
+def test_devam_sayfasi_aylari_doneme_gore(tmp_path, donem, beklenen):
+    yol = tmp_path / "devam.docx"
+    _devam_docx_yaz(yol)
+    loglar = []
+    doc = exay.devam_sayfasi_hazirla(str(yol), donem, lambda m, t='': loglar.append(m))
+    assert _devam_tablo_aylari(doc) == beklenen
+    assert any("devam sayfası eklenecek" in m for m in loglar)
+
+
+def test_devam_sayfasi_okunamazsa_none_ve_uyari(tmp_path):
+    bozuk = tmp_path / "devam.docx"; bozuk.write_bytes(b"bozuk")
+    loglar = []
+    assert exay.devam_sayfasi_hazirla(str(bozuk), "01.2027",
+                                      lambda m, t='': loglar.append((m, t))) is None
+    assert any(t == "warn" for _m, t in loglar)
+
+
+def test_kit_arkasina_devam_ayri_yatay_bolum(tmp_path):
+    """KİT (dikey) + devam (yatay) tek dosyada: iki bölüm, yönler ayrı korunur;
+    devam tablosunun stili taşınır, devamın yazı tipi doğrudan biçime yazılır
+    (KİT'in Normal'i devamı büyütüp taşırmasın — gerçek dosyada boş sayfa oluşuyordu)."""
+    import docx
+    from docx.enum.section import WD_ORIENT
+    sablon = tmp_path / "kit.docx"
+    _docx_sablon_yaz(sablon, "İSPA İNŞ. SAN. PAZ. A.Ş.", "V.D. 4810017371")
+    kit = docx.Document(str(sablon)); kit.styles['Normal'].font.name = "Cambria"
+    stil = kit.styles['Light Grid Accent 1'].element
+    stil.getparent().remove(stil)                                  # KİT'te bu stil YOK
+    kit.save(str(sablon))
+    _devam_docx_yaz(tmp_path / "devam.docx")
+    devam = exay.devam_sayfasi_hazirla(str(tmp_path / "devam.docx"), "01.2027")
+    firma, kols = _ornek_firma_df()
+    cikti = tmp_path / "cikti.docx"
+    exay.firma_docx_olustur(str(sablon), firma, str(cikti), kols, ek_belge=devam)
+    d = docx.Document(str(cikti))
+    assert [s.orientation for s in d.sections] == [WD_ORIENT.PORTRAIT, WD_ORIENT.LANDSCAPE]
+    assert _devam_tablo_aylari(d) == ["ARALIK / 2026", "OCAK / 2027"]
+    fatura = next(t for t in d.tables if len(t.columns) == 7)
+    assert fatura.rows[2].cells[1].text == "TC42026000001608"     # KİT doldurulmuş
+    devam_t = next(t for t in d.tables if "KDV BEYANNAMESİ" in t.rows[0].cells[0].text)
+    if importlib.util.find_spec("docxcompose"):
+        assert devam_t.style is not None and devam_t.style.name == "Light Grid Accent 1"
+    run = devam_t.rows[1].cells[0].paragraphs[0].runs[0]
+    assert run.font.name == "Times New Roman"                     # Normal → doğrudan biçim
+    # Kaynak devam belgesi değişmedi (her firmaya taze kopya): ikinci firma da aynı sonucu alır
+    cikti2 = tmp_path / "cikti2.docx"
+    exay.firma_docx_olustur(str(sablon), firma, str(cikti2), kols, ek_belge=devam)
+    assert len(docx.Document(str(cikti2)).sections) == 2
+
+
+def test_ymm_yazisina_devam_eklenmez(tmp_path):
+    import docx
+    sablon = tmp_path / "ymm.docx"
+    _ymm_yazi_docx_yaz(sablon, "OYAK ÇİMENTO FABRİKALARI A.Ş.", "ANKARA KURUMLAR V.D. – 6120050961")
+    _devam_docx_yaz(tmp_path / "devam.docx")
+    devam = exay.devam_sayfasi_hazirla(str(tmp_path / "devam.docx"), "01.2027")
+    firma, kols = _ornek_firma_df()
+    cikti = tmp_path / "ymm_cikti.docx"
+    exay.firma_docx_olustur(str(sablon), firma, str(cikti), kols, ek_belge=devam)
+    d = docx.Document(str(cikti))
+    assert len(d.sections) == 1
+    assert not any("KDV BEYANNAMESİ" in t.rows[0].cells[0].text for t in d.tables)
+
+
+def test_tek_dosyada_her_firmanin_devami_korunur(tmp_path):
+    """Word'leri tek dosyada birleştirince her firma: dikey KİT + yatay devam."""
+    import docx
+    from docx.enum.section import WD_ORIENT
+    sablon = tmp_path / "kit.docx"
+    _docx_sablon_yaz(sablon, "İSPA A.Ş.", "V.D. 4810017371")
+    _devam_docx_yaz(tmp_path / "devam.docx")
+    devam = exay.devam_sayfasi_hazirla(str(tmp_path / "devam.docx"), "01.2027")
+    firma, kols = _ornek_firma_df()
+    bloklar = [exay._firma_docx_hazirla(str(sablon), firma, kols, ek_belge=devam)[0]
+               for _ in range(2)]
+    yol = exay.firmalar_tek_docx(bloklar, str(tmp_path / "tek.docx"))
+    d = docx.Document(yol)
+    assert [s.orientation for s in d.sections] == [WD_ORIENT.PORTRAIT, WD_ORIENT.LANDSCAPE] * 2
+
+
+def test_dosyalari_isle_devam_sablonu_kit_arkasina(tmp_path):
+    import docx
+    yol, sk = _liste_ve_sablon(tmp_path)
+    _devam_docx_yaz(tmp_path / "devam.docx")
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        sablon_klasor=str(sk), cikti_turu='word',
+                        devam_sablon=str(tmp_path / "devam.docx"))
+    word = [p for p in (tmp_path / "Hazır Tutanaklar").glob("*.docx") if "FIRMA A" in p.name]
+    assert word
+    d = docx.Document(str(word[0]))
+    assert len(d.sections) == 2
+    assert _devam_tablo_aylari(d) == ["MART / 2026", "NİSAN / 2026"]   # dönem 04.2026
+
+
+def test_normal_bicimi_ayni_ise_dokunulmaz(tmp_path):
+    import docx
+    _devam_docx_yaz(tmp_path / "a.docx")
+    d = docx.Document(str(tmp_path / "a.docx"))
+    assert exay._normal_bicimini_sabitle(d, exay._temel_bicim(d)) == 0
+
+
+# ── YMM yazısı: üstteki tarih = çıktının alındığı gün ──
+def _ymm_tarihli_yaz(yol, konu="Konu : Bilgi İsteme\t\t\t30.09.2026"):
+    import docx
+    _ymm_yazi_docx_yaz(yol, "OYAK ÇİMENTO FABRİKALARI A.Ş.", "ANKARA KURUMLAR V.D. – 6120050961")
+    d = docx.Document(str(yol))
+    p = next(p for p in d.paragraphs if p.text.startswith("Konu"))
+    p.text = konu
+    d.save(str(yol))
+
+
+def test_ymm_yazisi_tarihi_cikti_gunu(tmp_path):
+    import docx
+    sablon = tmp_path / "ymm.docx"
+    _ymm_tarihli_yaz(sablon)
+    firma, kols = _ornek_firma_df()
+    cikti = tmp_path / "c.docx"
+    exay.firma_docx_olustur(str(sablon), firma, str(cikti), kols)
+    d = docx.Document(str(cikti))
+    bugun = datetime.now().strftime('%d.%m.%Y')
+    konu = next(p.text for p in d.paragraphs if p.text.startswith("Konu"))
+    assert konu.endswith(bugun) and "30.09.2026" not in konu
+    metin = "\n".join(c.text for t in d.tables for r in t.rows for c in r.cells)
+    assert "31.01.2026 Tarih" in metin                 # İnceleme Dayanağı tarihi değişmez
+    assert "08.01.2026" in metin                       # fatura tarihi değişmez
+
+
+@pytest.mark.parametrize("konu", ["Konu : Bilgi İsteme\t??.??.????", "Konu: BİLGİ İSTEME  1/2/2026"])
+def test_ymm_yazisi_tarih_bicimleri(konu):
+    import docx
+    d = docx.Document()
+    d.add_paragraph(konu)
+    assert exay._docx_yazi_tarihi_yaz(d, "02.10.2026")
+    assert d.paragraphs[0].text.endswith("02.10.2026")
+
+
+def test_tarih_birden_cok_run_a_bolunmus():
+    import docx
+    d = docx.Document()
+    p = d.add_paragraph("Konu : Bilgi İsteme   ")
+    p.add_run("30.09."); p.add_run("2026")
+    assert exay._docx_yazi_tarihi_yaz(d, "02.10.2026")
+    assert d.paragraphs[0].text == "Konu : Bilgi İsteme   02.10.2026"
+
+
+def test_kit_te_tarih_degismez():
+    import docx
+    d = docx.Document()
+    d.add_paragraph("KATMA DEĞER VERGİSİ İADESİ KARŞIT İNCELEME TUTANAĞI 30.09.2026")
+    assert not exay._docx_yazi_tarihi_yaz(d, "02.10.2026")
+    assert "30.09.2026" in d.paragraphs[0].text
+
+
+# ── .doc → .docx (Word ile, önbellekli) ──
+def _sahte_cevirici_kur(monkeypatch, tmp_path, kaynak_docx):
+    """Sahte win32com: Documents.Open(...).SaveAs(hedef) → kaynak_docx'i hedefe kopyalar."""
+    import sys, types, shutil
+    sayac = {"open": 0, "dispatch": 0}
+    class _Belge:
+        def SaveAs(self, hedef, FileFormat=None):
+            assert FileFormat == 16
+            shutil.copy(kaynak_docx, hedef)
+        def Close(self, SaveChanges=False): pass
+    class _Belgeler:
+        def Open(self, yol, ReadOnly=True):
+            sayac["open"] += 1
+            return _Belge()
+    class _Word:
+        Documents = _Belgeler()
+        def Quit(self): pass
+    def _dispatch(ad):
+        sayac["dispatch"] += 1
+        return _Word()
+    paket = types.ModuleType("win32com"); istemci = types.ModuleType("win32com.client")
+    istemci.DispatchEx = _dispatch; paket.client = istemci
+    monkeypatch.setitem(sys.modules, "win32com", paket)
+    monkeypatch.setitem(sys.modules, "win32com.client", istemci)
+    monkeypatch.setattr(exay, "ONBELLEK_KLASORU", tmp_path / "onbellek")
+    return sayac
+
+
+def test_doc_docx_cevrilir_ve_onbellekten_kullanilir(tmp_path, monkeypatch):
+    _docx_sablon_yaz(tmp_path / "kaynak.docx", "İSPA A.Ş.", "V.D. 4810017371")
+    sayac = _sahte_cevirici_kur(monkeypatch, tmp_path, tmp_path / "kaynak.docx")
+    doc = tmp_path / "ISPA.doc"; doc.write_bytes(b"eski ikili doc")
+    s1 = exay._doclari_docx_cevir([doc])
+    assert Path(s1[str(doc)]).suffix == ".docx" and Path(s1[str(doc)]).exists()
+    s2 = exay._doclari_docx_cevir([doc])                 # ikinci kez: Word açılmaz
+    assert s2 == s1 and sayac["open"] == 1 and sayac["dispatch"] == 1
+    doc.write_bytes(b"degisti, daha uzun icerik")         # şablon değişti → yeniden çevrilir
+    exay._doclari_docx_cevir([doc])
+    assert sayac["open"] == 2
+
+
+def test_doc_sablon_indekslenince_docx_yolundan_uretilir(tmp_path, monkeypatch):
+    _docx_sablon_yaz(tmp_path / "kaynak.docx", "İSPA A.Ş.", "V.D. 4810017371")
+    _sahte_cevirici_kur(monkeypatch, tmp_path, tmp_path / "kaynak.docx")
+    sk = tmp_path / "sablonlar"; sk.mkdir()
+    (sk / "ISPA.doc").write_bytes(b"eski ikili doc")
+    idx = exay.sablonlari_indeksle(str(sk))
+    yol, _blok = exay._sablon_yol_blok(idx["4810017371"])
+    assert yol.endswith(".docx")                           # COM ile yerinde düzenleme yok
+
+
+def test_word_baslatilamazsa_bos_sonuc_ve_uyari(tmp_path, monkeypatch):
+    import sys, types
+    istemci = types.ModuleType("win32com.client")
+    def _hata(ad): raise OSError("Word yok")
+    istemci.DispatchEx = _hata
+    paket = types.ModuleType("win32com"); paket.client = istemci
+    monkeypatch.setitem(sys.modules, "win32com", paket)
+    monkeypatch.setitem(sys.modules, "win32com.client", istemci)
+    monkeypatch.setattr(exay, "ONBELLEK_KLASORU", tmp_path / "onbellek")
+    doc = tmp_path / "a.doc"; doc.write_bytes(b"x")
+    loglar = []
+    assert exay._doclari_docx_cevir([doc], lambda m, t='': loglar.append(m)) == {}
+    assert any("Word başlatılamadı" in m for m in loglar)

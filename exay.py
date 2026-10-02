@@ -18,6 +18,8 @@ from pathlib import Path
 # her açılışta aynı kriterlerle gelsin. Program Files gibi yazılamayan yerlere
 # kurulmuş .exe'de sorun olmaması için kullanıcı ana klasörüne yazılır.
 AYAR_YOLU = Path.home() / '.exay_ayarlar.json'
+# Word ile .docx'e çevrilen .doc şablonların önbelleği (şablon değişmedikçe yeniden çevrilmez)
+ONBELLEK_KLASORU = Path.home() / '.exay_onbellek'
 
 
 def kaynak_yolu(rel_yol):
@@ -1357,27 +1359,100 @@ def _metni_bloklara_ayir(metin):
     idxs.append(len(metin))
     return [metin[idxs[i]:idxs[i + 1]] for i in range(len(idxs) - 1)]
 
-def _doc_docx_cevir(path):
-    """Eski ikili .doc'u Word (COM) ile geçici bir .docx'e çevirir; yolu döndürür.
-    Yalnızca Windows + Word'de çalışır (birleşik .doc'ları bölmek için gerekir);
-    pywin32/Word yoksa RuntimeError yükseltir. Şablonun aslı değişmez."""
+def _com_hazirla():
+    """COM'u ÇAĞIRAN iş parçacığında başlatır. GUI işi ayrı bir thread'de yürütür;
+    pythoncom yalnızca İLK içe aktarıldığı thread'i kendiliğinden başlatır → aynı
+    oturumda ikinci çalıştırmada Word 'CoInitialize has not been called' hatası
+    verir. Aynı thread'de tekrar çağrılması zararsızdır."""
+    try:
+        import pythoncom
+        pythoncom.CoInitialize()
+    except Exception:
+        pass
+
+def _doclari_docx_cevir(yollar, log_cb=None):
+    """Eski ikili .doc dosyalarını Word (COM) ile .docx'e çevirir → {str(.doc): str(.docx)}.
+    Neden: Word çıktısı, kullanıcının gerçek şablonlarıyla doğrulanmış TEK yoldan
+    (.docx / python-docx) üretilsin — devam sayfası, yazı tarihi, kalın olmayan
+    fatura satırı ve tarih sırası kuralları her şablonda aynı işlesin.
+    Tek Word örneği açılır; çevrilenler ONBELLEK_KLASORU'nda tutulur (dosya
+    değişmedikçe bir daha çevrilmez). Word yoksa boş sözlük döner. Asıl .doc değişmez."""
+    yollar = [Path(y) for y in yollar]
+    if not yollar:
+        return {}
     try:
         import win32com.client as win32
     except Exception:
-        raise RuntimeError("Word otomasyonu yok (birleşik .doc'u bölmek için gerekli)")
-    import tempfile
-    hedef = os.path.join(tempfile.mkdtemp(prefix='exay_'), Path(path).stem + '.docx')
-    word = win32.DispatchEx("Word.Application"); word.Visible = False
+        return {}
+    import hashlib
+    sonuc, cevrilecek = {}, []
     try:
-        try: word.DisplayAlerts = 0
-        except Exception: pass
-        d = word.Documents.Open(os.path.abspath(path), ReadOnly=True)
-        d.SaveAs(os.path.abspath(hedef), FileFormat=16)   # 16 = wdFormatDocumentDefault (.docx)
-        d.Close(SaveChanges=False)
-    finally:
-        try: word.Quit()
-        except Exception: pass
-    return hedef
+        ONBELLEK_KLASORU.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    for y in yollar:
+        try:
+            st = y.stat()
+            anahtar = hashlib.sha1(f"{y.resolve()}|{st.st_mtime_ns}|{st.st_size}"
+                                   .encode('utf-8')).hexdigest()[:16]
+        except Exception:
+            continue
+        hedef = ONBELLEK_KLASORU / f"{y.stem[:40]}_{anahtar}.docx"
+        if hedef.exists() and hedef.stat().st_size > 0:
+            sonuc[str(y)] = str(hedef)
+        else:
+            cevrilecek.append((y, hedef))
+    onbellekten = len(sonuc)
+    word = None
+    if cevrilecek:
+        try:
+            _com_hazirla()
+            word = win32.DispatchEx("Word.Application")
+        except Exception as e:     # pywin32 var ama Word kurulu/açılabilir değil
+            if log_cb:
+                log_cb(f"  ⚠️  Word başlatılamadı, {len(cevrilecek)} .doc şablon .docx'e "
+                       f"çevrilemedi: {e}", "warn")
+    if word is not None:
+        try:
+            try: word.Visible = False
+            except Exception: pass
+            try: word.DisplayAlerts = 0
+            except Exception: pass
+            for y, hedef in cevrilecek:
+                d = None
+                try:
+                    d = word.Documents.Open(os.path.abspath(str(y)), ReadOnly=True)
+                    d.SaveAs(os.path.abspath(str(hedef)), FileFormat=16)  # 16 = .docx
+                    sonuc[str(y)] = str(hedef)
+                except Exception as e:
+                    try: hedef.unlink()      # yarım kalan dosya önbellekte geçerli sanılmasın
+                    except Exception: pass
+                    if log_cb:
+                        log_cb(f"  ⚠️  {y.name} Word ile .docx'e çevrilemedi: {e}", "warn")
+                finally:
+                    try:
+                        if d is not None: d.Close(SaveChanges=False)
+                    except Exception:
+                        pass
+        finally:
+            try: word.Quit()
+            except Exception: pass
+    if log_cb and sonuc:
+        log_cb(f"  🔄 {len(sonuc)} .doc şablon .docx olarak kullanılacak "
+               f"({len(sonuc) - onbellekten} yeni çevrildi, {onbellekten} önbellekten).", "info")
+    return sonuc
+
+def _doc_docx_cevir(path):
+    """Tek bir .doc'u Word ile .docx'e çevirir (önbellekli); yolu döndürür.
+    Word yoksa ya da çevrilemezse RuntimeError."""
+    try:
+        import win32com.client  # noqa: F401
+    except Exception:
+        raise RuntimeError("Word otomasyonu yok (birleşik .doc'u bölmek için gerekli)")
+    sonuc = _doclari_docx_cevir([path])
+    if str(Path(path)) not in sonuc:
+        raise RuntimeError(f"{Path(path).name} Word ile .docx'e çevrilemedi")
+    return sonuc[str(Path(path))]
 
 def _sablon_kayitlari(path):
     """Bir şablon dosyasındaki TÜM firma kayıtlarını [(vkn, unvan, blok, üretim_yolu)]
@@ -1444,10 +1519,13 @@ def sablonlari_indeksle(klasor, log_cb=None):
     coklu = 0
     vknsiz = []                            # okunamayan / karşı firma VKN'si bulunamayan
     wordsuz = []                           # birleşik .doc — bölmek için Word gerekli
+    # .doc şablonlar (Word varsa) bir kez .docx'e çevrilir; üretim .docx yolundan gider
+    donusum = _doclari_docx_cevir([p for p in dosyalar if p.suffix.lower() == '.doc'
+                                   and not p.name.startswith('~$')], log_cb)
     for p in dosyalar:
         if p.name.startswith('~$'):        # Word geçici dosyaları
             continue
-        kayitlar = _sablon_kayitlari(str(p))
+        kayitlar = _sablon_kayitlari(donusum.get(str(p), str(p)))
         if not kayitlar:
             if p.suffix.lower() == '.doc' and not word_destekli() and _birlesik_doc_mu(p):
                 wordsuz.append(p.name)
@@ -1610,6 +1688,7 @@ def firma_word_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=Non
     def _yaz(m, t='info'):
         if log_cb: log_cb(m, t)
 
+    _com_hazirla()
     word = win32.DispatchEx("Word.Application")
     word.Visible = False
     try:
@@ -2024,10 +2103,323 @@ def _docx_fatura_doldur(doc, firma_df, tum_kolonlar, inceleme_dayanagi=None, log
                    "bilgisi güncellenemedi.", "warn")
     return yazilan
 
+_TARIH_DESENI = re.compile(r'\d{1,2}[./]\d{1,2}[./]\d{4}|\?\?\.\?\?\.\?\?\?\?')
+
+def _docx_yazi_tarihi_yaz(doc, tarih):
+    """YMM Bilgi İsteme yazısının üst satırındaki tarihi ('Konu: Bilgi İsteme …
+    30.09.2026' ya da boş şablondaki '??.??.????') ÇIKTININ ALINDIĞI GÜNÜN tarihiyle
+    değiştirir (kullanıcı isteği). Yalnızca o satır değişir; İnceleme Dayanağı ve
+    fatura tarihleri değişmez. KİT'te böyle satır yoktur → dokunmaz. Yazıldıysa True."""
+    for p in doc.paragraphs:
+        t = _ascii_kucuk(p.text)
+        if 'konu' not in t or 'bilgi isteme' not in t:
+            continue
+        for r in p.runs:
+            if _TARIH_DESENI.search(r.text):
+                r.text = _TARIH_DESENI.sub(tarih, r.text, count=1)
+                return True
+        m = _TARIH_DESENI.search(p.text)
+        if m and p.runs:          # tarih birden çok run'a bölünmüş: metni ilk run'da topla
+            p.runs[0].text = p.text[:m.start()] + tarih + p.text[m.end():]
+            for r in p.runs[1:]:
+                r.text = ''
+            return True
+    return False
+
+_AYLAR_TR = ('OCAK', 'ŞUBAT', 'MART', 'NİSAN', 'MAYIS', 'HAZİRAN', 'TEMMUZ',
+             'AĞUSTOS', 'EYLÜL', 'EKİM', 'KASIM', 'ARALIK')
+_AY_YIL_HUCRE = re.compile(r'^\s*(ocak|subat|mart|nisan|mayis|haziran|temmuz|agustos|'
+                           r'eylul|ekim|kasim|aralik)\s*/\s*\d{4}\s*$')
+
+def _devam_aylarini_yaz(doc, donem):
+    """KİT devam sayfasındaki 'KDV BEYANNAMESİ BİLGİLERİ' ay başlıklarını (gerçek
+    şablonda 'TEMMUZ / 2026' | 'AĞUSTOS / 2026') dönemin BİR ÖNCEKİ ayı ve DÖNEM ayıyla
+    (soldan sağa) günceller; ör. dönem 01.2027 → 'ARALIK / 2026' | 'OCAK / 2027'.
+    Güncellenen başlık sayısını döndürür."""
+    ay, yil = int(str(donem)[:2]), int(str(donem)[3:7])
+    onceki_ay, onceki_yil = (ay - 1, yil) if ay > 1 else (12, yil - 1)
+    degerler = [f"{_AYLAR_TR[onceki_ay - 1]} / {onceki_yil}", f"{_AYLAR_TR[ay - 1]} / {yil}"]
+    hucreler, gorulen = [], set()
+    for t in doc.tables:
+        for r in t.rows:
+            for c in r.cells:
+                if id(c._tc) in gorulen:          # birleşik hücre tekrarı
+                    continue
+                gorulen.add(id(c._tc))
+                if _AY_YIL_HUCRE.match(_ascii_kucuk(c.text)):
+                    hucreler.append(c)
+    if len(hucreler) == 1:
+        degerler = degerler[1:]                    # tek başlık varsa: dönem ayı
+    for c, v in zip(hucreler, degerler):
+        _docx_hucre_yaz(c, v)
+    return min(len(hucreler), len(degerler))
+
+def devam_sayfasi_hazirla(yol, donem, log_cb=None):
+    """KİT devam sayfası şablonunu açar (.doc ise Word ile .docx'e çevrilerek), ay
+    başlıklarını döneme göre günceller ve docx.Document döndürür (her KİT'in
+    arkasına eklenmek üzere). Okunamazsa None (çıktılar devamsız üretilir, uyarılır)."""
+    p = Path(yol)
+    try:
+        if p.suffix.lower() == '.doc':
+            d = _doclari_docx_cevir([p], log_cb).get(str(p))
+            if not d:
+                raise RuntimeError("Word ile .docx'e çevrilemedi — Word kurulu değilse devam "
+                                   "sayfasını Word'de açıp .docx olarak kaydedin")
+            p = Path(d)
+        import docx
+        doc = docx.Document(str(p))
+        n = _devam_aylarini_yaz(doc, donem)
+        if log_cb:
+            if n:
+                log_cb(f"  📎 Her KİT'in arkasına devam sayfası eklenecek ({Path(yol).name}; "
+                       f"ay başlıkları döneme göre güncellendi).", "info")
+            else:
+                log_cb(f"  📎 Her KİT'in arkasına devam sayfası eklenecek ({Path(yol).name}); "
+                       f"ay başlığı ('AY / YYYY') bulunamadı, olduğu gibi kullanılacak.", "warn")
+        return doc
+    except Exception as e:
+        if log_cb:
+            log_cb(f"  ⚠️  KİT devam sayfası okunamadı ({Path(yol).name}): {e}", "warn")
+        return None
+
+def _docx_kopya(doc):
+    """Açık docx.Document'in bağımsız bir kopyası (bellekte kaydet-aç). Her KİT'e
+    aynı devam sayfası eklenirken birleştirme kaynağı değiştirebildiğinden her
+    firmaya taze kopya verilir."""
+    import io
+    import docx
+    tampon = io.BytesIO()
+    doc.save(tampon)
+    tampon.seek(0)
+    return docx.Document(tampon)
+
+_ARALIK_VARSAYILAN = {'before': '0', 'after': '0', 'line': '240', 'lineRule': 'auto'}
+
+def _varsayilan_paragraf_stili(doc):
+    """Belgenin varsayılan paragraf stili (w:default='1'); işaretsizse (LibreOffice
+    çıktısında olur) 'Normal' kimlikli/adlı stil. Yoksa None."""
+    from docx.enum.style import WD_STYLE_TYPE
+    try:
+        st = doc.styles.default(WD_STYLE_TYPE.PARAGRAPH)
+        if st is not None:
+            return st.element
+    except Exception:
+        pass
+    el = doc.styles.element.get_by_id('Normal')
+    if el is None:
+        try:
+            el = doc.styles['Normal'].element
+        except Exception:
+            el = None
+    return el
+
+def _temel_bicim(doc):
+    """Belgenin varsayılan metin biçimi (Normal stil, yoksa docDefaults; tema yazı
+    tipi çözülür): (yazı tipi adı, boyut [yarım punto, str], aralık sözlüğü)."""
+    from docx.oxml.ns import qn
+    stiller = doc.styles.element
+    dd = stiller.find(qn('w:docDefaults'))
+    rpr_dd = dd.find(qn('w:rPrDefault') + '/' + qn('w:rPr')) if dd is not None else None
+    ppr_dd = dd.find(qn('w:pPrDefault') + '/' + qn('w:pPr')) if dd is not None else None
+    normal = _varsayilan_paragraf_stili(doc)
+    rpr_n = normal.find(qn('w:rPr')) if normal is not None else None
+    ppr_n = normal.find(qn('w:pPr')) if normal is not None else None
+
+    def _tema_fontu(ad):
+        try:
+            from docx.opc.constants import RELATIONSHIP_TYPE as RT
+            tema = doc.part.part_related_by(RT.THEME)
+            from lxml import etree
+            kok = etree.fromstring(tema.blob)
+            a = '{http://schemas.openxmlformats.org/drawingml/2006/main}'
+            grup = 'majorFont' if ad.startswith('major') else 'minorFont'
+            el = kok.find(f'.//{a}{grup}/{a}latin')
+            return el.get('typeface') if el is not None else None
+        except Exception:
+            return None
+
+    font = None
+    for rpr in (rpr_n, rpr_dd):
+        rf = rpr.find(qn('w:rFonts')) if rpr is not None else None
+        if rf is not None:
+            font = rf.get(qn('w:ascii')) or (rf.get(qn('w:asciiTheme')) and
+                                             _tema_fontu(rf.get(qn('w:asciiTheme'))))
+            if font:
+                break
+    boyut = '20'                                   # Word varsayılanı 10 punto
+    for rpr in (rpr_n, rpr_dd):
+        sz = rpr.find(qn('w:sz')) if rpr is not None else None
+        if sz is not None and sz.get(qn('w:val')):
+            boyut = sz.get(qn('w:val'))
+            break
+    aralik = dict(_ARALIK_VARSAYILAN)
+    for ppr in (ppr_dd, ppr_n):                   # Normal, docDefaults'u ezer
+        sp = ppr.find(qn('w:spacing')) if ppr is not None else None
+        if sp is not None:
+            for k in aralik:
+                if sp.get(qn('w:' + k)) is not None:
+                    aralik[k] = sp.get(qn('w:' + k))
+    return font, boyut, aralik
+
+def _normal_bicimini_sabitle(doc, hedef_temel):
+    """`doc`'un 'Normal' metin biçimi (yazı tipi/boyut/satır aralığı) `hedef_temel`
+    belgesininkinden farklıysa, bu biçimi stilden almayan her paragraf/run'a DOĞRUDAN
+    yazar. Neden: belge başka bir belgeye eklenince stiller hedefinkiyle eşleşir ve
+    kaynağın 'Normal'i kaybolur — gerçek KİT devam sayfası (Times 10 pt) KİT'in
+    Normal'iyle büyüyüp taşıyor, fazladan boş sayfa oluşuyordu. Değişen öğe sayısı."""
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    font, boyut, aralik = _temel_bicim(doc)
+    f_fark = bool(font) and font != hedef_temel[0]
+    b_fark = boyut != hedef_temel[1]
+    a_fark = aralik != hedef_temel[2]
+    if not (f_fark or b_fark or a_fark):
+        return 0
+    stiller = doc.styles.element
+    normal = _varsayilan_paragraf_stili(doc)
+    varsayilan_id = normal.get(qn('w:styleId')) if normal is not None else None
+
+    def _font_var(rpr):
+        rf = rpr.find(qn('w:rFonts')) if rpr is not None else None
+        return rf is not None and bool(rf.get(qn('w:ascii')) or rf.get(qn('w:asciiTheme')))
+
+    def _zincirde(stil_id, kontrol):
+        """Stil (Normal hariç) ya da dayandığı stillerden biri özelliği tanımlıyor mu?"""
+        gorulen = set()
+        while stil_id and stil_id != varsayilan_id and stil_id not in gorulen:
+            gorulen.add(stil_id)
+            st = stiller.get_by_id(stil_id)
+            if st is None:
+                return False
+            if kontrol(st):
+                return True
+            b = st.find(qn('w:basedOn'))
+            stil_id = b.get(qn('w:val')) if b is not None else None
+        return False
+
+    stil_font = lambda st: _font_var(st.find(qn('w:rPr')))
+    stil_boyut = lambda st: st.find(qn('w:rPr') + '/' + qn('w:sz')) is not None
+    stil_aralik = lambda st: st.find(qn('w:pPr') + '/' + qn('w:spacing')) is not None
+
+    def _rpr_yaz(rpr, p_stil, r_stil):
+        n = 0
+        if f_fark and not _font_var(rpr) and not _zincirde(r_stil, stil_font) \
+                and not _zincirde(p_stil, stil_font):
+            rf = rpr.get_or_add_rFonts()
+            for k in ('ascii', 'hAnsi', 'cs', 'eastAsia'):
+                rf.set(qn('w:' + k), font)
+            n += 1
+        if b_fark and rpr.find(qn('w:sz')) is None and not _zincirde(r_stil, stil_boyut) \
+                and not _zincirde(p_stil, stil_boyut):
+            rpr.get_or_add_sz().set(qn('w:val'), boyut)
+            n += 1
+        return n
+
+    def _stil_id(kap, etiket):
+        el = kap.find(qn(etiket)) if kap is not None else None
+        return el.get(qn('w:val')) if el is not None else None
+
+    degisen = 0
+    for p in doc.element.body.iter(qn('w:p')):
+        ppr = p.get_or_add_pPr()
+        p_stil = _stil_id(ppr, 'w:pStyle')
+        if a_fark and ppr.find(qn('w:spacing')) is None and not _zincirde(p_stil, stil_aralik):
+            sp = ppr.get_or_add_spacing()
+            for k, v in aralik.items():
+                sp.set(qn('w:' + k), v)
+            degisen += 1
+        # Boş paragrafın yüksekliğini paragraf işaretinin biçimi belirler
+        isaret = ppr.find(qn('w:rPr'))
+        if isaret is None:
+            isaret = OxmlElement('w:rPr')
+            sonraki = ppr.find(qn('w:sectPr'))
+            if sonraki is None:
+                sonraki = ppr.find(qn('w:pPrChange'))
+            if sonraki is not None:
+                sonraki.addprevious(isaret)
+            else:
+                ppr.append(isaret)
+        degisen += _rpr_yaz(isaret, p_stil, None)
+        if len(isaret) == 0:
+            ppr.remove(isaret)
+        for r in p.iter(qn('w:r')):
+            ust = r.getparent()
+            while ust is not None and ust.tag != qn('w:p'):
+                ust = ust.getparent()
+            if ust is not p:                       # metin kutusu içindeki iç paragraf
+                continue
+            rpr = r.get_or_add_rPr()
+            degisen += _rpr_yaz(rpr, p_stil, _stil_id(rpr, 'w:rStyle'))
+            if len(rpr) == 0:
+                r.remove(rpr)
+        if len(ppr) == 0:
+            p.remove(ppr)
+    return degisen
+
+def _docx_bolum_olarak_ekle(hedef_doc, kaynak_doc):
+    """kaynak_doc'u hedef_doc'un sonuna YENİ BÖLÜM (yeni sayfa) olarak ekler; iki
+    belgenin sayfa düzeni (dikey/yatay, kenar boşlukları) AYRI AYRI korunur —
+    ör. dikey KİT sayfasının arkasına yatay devam sayfaları. Üst/alt bilgi önceki
+    bölümden devam eder (kaynağın üst/alt bilgi bağlantıları taşınmaz).
+    Kaynağın kullandığı ama hedefte olmayan stiller (tablo kenarlıkları vb.)
+    docxcompose ile taşınır; kaynağın 'Normal' biçimi doğrudan biçime çevrilir.
+    kaynak_doc DEĞİŞEBİLİR — tekrar kullanılacaksa kopyasını (`_docx_kopya`) verin."""
+    from copy import deepcopy
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    body = hedef_doc.element.body
+    h_sect = body.find(qn('w:sectPr'))
+    k_sect = kaynak_doc.element.body.find(qn('w:sectPr'))
+    _normal_bicimini_sabitle(kaynak_doc, _temel_bicim(hedef_doc))
+    if h_sect is None or k_sect is None:
+        _docx_govde_ekle(hedef_doc, kaynak_doc, sayfa_sonu=True)
+        return
+    k_sect = deepcopy(k_sect)
+    # 1) Hedefin son bölümünü kapat: ayarları son paragrafın pPr'ına taşınır
+    elemanlar = [e for e in body if e.tag in (qn('w:p'), qn('w:tbl'))]
+    son = elemanlar[-1] if elemanlar else None
+    if (son is None or son.tag != qn('w:p')
+            or son.find(qn('w:pPr') + '/' + qn('w:sectPr')) is not None):
+        son = OxmlElement('w:p')
+        h_sect.addprevious(son)
+    pPr = son.find(qn('w:pPr'))
+    if pPr is None:
+        pPr = OxmlElement('w:pPr')
+        son.insert(0, pPr)
+    pPr.append(deepcopy(h_sect))
+    # 2) Kaynak gövdesi; bölüm sonu yeni sayfayı zaten açar. docxcompose stilleri
+    #    (dil-bağımsız, ada göre), numaralandırmayı ve resimleri taşır; yoksa yalnız
+    #    gövde + resimler kopyalanır (eksik stil hedefin Normal'ine düşer).
+    try:
+        from docxcompose.composer import Composer
+    except Exception:
+        Composer = None
+    if Composer is not None:
+        Composer(hedef_doc).append(kaynak_doc)
+    else:
+        _docx_govde_ekle(hedef_doc, kaynak_doc, sayfa_sonu=False)
+    # 3) Belgenin son bölümü artık kaynağınki (ör. yatay)
+    h_sect = body.find(qn('w:sectPr'))
+    for ref in k_sect.findall(qn('w:headerReference')) + k_sect.findall(qn('w:footerReference')):
+        k_sect.remove(ref)
+    tip = k_sect.find(qn('w:type'))
+    if tip is not None:
+        k_sect.remove(tip)                # varsayılan bölüm başı: yeni sayfa
+    if h_sect is not None:
+        body.replace(h_sect, k_sect)
+    else:
+        body.append(k_sect)
+
+def _ymm_yazisi_mi_belge(doc):
+    """Açık docx.Document bir YMM Bilgi İsteme yazısı mı (KİT değil mi)?"""
+    return 'hakkinda bilgi istenilen' in _ascii_kucuk(_docx_belge_metni(doc))
+
 def _firma_docx_hazirla(sablon_yol, firma_df, tum_kolonlar, inceleme_dayanagi=None,
-                        log_cb=None, blok=None):
+                        log_cb=None, blok=None, ek_belge=None):
     """Şablondan (gerekirse birleşik dosyanın `blok`. bloğunu izole ederek) tek
     firmalık doldurulmuş docx.Document ile yazılan satır sayısını döndürür.
+    YMM yazısında üstteki tarih çıktı günüyle güncellenir. `ek_belge` (KİT devam
+    sayfası) verilirse ve belge KİT ise sonuna ayrı bölüm olarak eklenir.
     KAYDETMEZ. python-docx yoksa RuntimeError yükseltir."""
     try:
         import docx  # noqa: F401
@@ -2038,14 +2430,19 @@ def _firma_docx_hazirla(sablon_yol, firma_df, tum_kolonlar, inceleme_dayanagi=No
     else:
         doc = _docx_blok_belgesi(sablon_yol, blok)
     yazilan = _docx_fatura_doldur(doc, firma_df, tum_kolonlar, inceleme_dayanagi, log_cb)
+    _docx_yazi_tarihi_yaz(doc, datetime.now().strftime('%d.%m.%Y'))
+    if ek_belge is not None and not _ymm_yazisi_mi_belge(doc):
+        _docx_bolum_olarak_ekle(doc, _docx_kopya(ek_belge))   # her firmaya taze kopya
     return doc, yazilan
 
 def firma_docx_olustur(sablon_yol, firma_df, cikis_yol, tum_kolonlar, log_cb=None,
-                       inceleme_dayanagi=None, blok=None):
+                       inceleme_dayanagi=None, blok=None, ek_belge=None):
     """Bir firmanın .docx tutanağını üretip `cikis_yol`'a kaydeder (Word GEREKTİRMEZ).
-    `blok` verilirse birleşik şablon dosyasının o firma bloğu kullanılır."""
+    `blok` verilirse birleşik şablon dosyasının o firma bloğu kullanılır;
+    `ek_belge` KİT devam sayfasıdır (yalnız KİT'e eklenir)."""
     doc, yazilan = _firma_docx_hazirla(sablon_yol, firma_df, tum_kolonlar,
-                                       inceleme_dayanagi, log_cb, blok=blok)
+                                       inceleme_dayanagi, log_cb, blok=blok,
+                                       ek_belge=ek_belge)
     os.makedirs(os.path.dirname(os.path.abspath(cikis_yol)), exist_ok=True)
     gercek = _guvenli_docx_kaydet(doc, cikis_yol)
     if log_cb:
@@ -2102,6 +2499,11 @@ def _docx_govde_ekle(hedef_doc, kaynak_doc, sayfa_sonu=True):
         if el.tag == qn('w:sectPr'):
             continue
         kopya = deepcopy(el)
+        # İçerideki bölüm sonlarının üst/alt bilgi bağlantıları kaynağın parçalarına
+        # işaret eder; hedefte geçersiz olurlar → at (bölüm öncekinden devralır).
+        for sp in kopya.iter(qn('w:sectPr')):
+            for ref in sp.findall(qn('w:headerReference')) + sp.findall(qn('w:footerReference')):
+                sp.remove(ref)
         if kaynak_part is not hedef_part:
             for node in kopya.iter():
                 for ad in [a for a in node.attrib if a.startswith(R_NS)]:
@@ -2117,7 +2519,7 @@ def firmalar_tek_docx(bloklar, cikis_yol):
         return None
     hedef = bloklar[0]
     for nd in bloklar[1:]:
-        _docx_govde_ekle(hedef, nd, sayfa_sonu=True)
+        _docx_bolum_olarak_ekle(hedef, nd)   # her firma yeni sayfada, yatay devam korunur
     os.makedirs(os.path.dirname(os.path.abspath(cikis_yol)), exist_ok=True)
     return _guvenli_docx_kaydet(hedef, cikis_yol)
 
@@ -2173,7 +2575,7 @@ def _sablon_ymm_mi(yol, blok=None):
     return 'hakkinda bilgi istenilen' in _ascii_kucuk(metin)
 
 def firma_word_uret(sablon_kaydi, firma_df, cikis_kl, sira_no, donem, vkn, unvan,
-                    tum_kolonlar, log_cb=None, inceleme_dayanagi=None):
+                    tum_kolonlar, log_cb=None, inceleme_dayanagi=None, ek_belge=None):
     """Eşleşen şablondan firma tutanağı üretir; uzantıya göre doğru yöntemi seçer:
       .docx → python-docx (Word gerektirmez),  .doc → Word COM (Windows + Word).
     `sablon_kaydi` (yol, blok) olabilir: çok-firmalı .docx'te blok o firmanın
@@ -2186,7 +2588,11 @@ def firma_word_uret(sablon_kaydi, firma_df, cikis_kl, sira_no, donem, vkn, unvan
     cikis = str(Path(cikis_kl) / ad)
     if ext == '.docx':
         return firma_docx_olustur(yol, firma_df, cikis, tum_kolonlar, log_cb,
-                                  inceleme_dayanagi=inceleme_dayanagi, blok=blok)
+                                  inceleme_dayanagi=inceleme_dayanagi, blok=blok,
+                                  ek_belge=ek_belge)
+    if ek_belge is not None and log_cb:
+        log_cb("      ⚠️ Bu .doc şablon Word ile .docx'e çevrilemediği için KİT devam "
+               "sayfası eklenemedi (şablonu Word'de .docx olarak kaydedin).", "warn")
     return firma_word_olustur(yol, firma_df, cikis, tum_kolonlar, log_cb,
                               inceleme_dayanagi=inceleme_dayanagi)
 
@@ -2263,7 +2669,9 @@ def ozet_rapor_olustur(df, secilen, df_gecersiz, esik_tek, esik_toplam,
 def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb,
                    ilerleme_cb=None, cikis_kok=None, pdf_uret=False,
                    sablon_klasor=None, cikti_turu='ikisi', inceleme_dayanagi=None,
-                   word_tek_dosya=False, bos_sablon=None):
+                   word_tek_dosya=False, bos_sablon=None, devam_sablon=None):
+    # devam_sablon: KİT devam sayfası (2 yatay sayfa); verilirse her KİT'in arkasına
+    #   ay başlıkları döneme göre güncellenerek eklenir (YMM yazılarına eklenmez).
     # word_tek_dosya: üretilen .docx tutanakları tek bir dosyada (her firma yeni
     #   sayfada) birleştir. bos_sablon: eşleşmeyen firmalar için kullanılacak boş
     #   .docx şablonu (fatura + bilinen ünvan/VKN doldurulur, gerisi kullanıcıda).
@@ -2454,6 +2862,8 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                    f"{Path(bos_sablon).name}", "info")
         if word_tek_dosya and word_iste:
             log_cb("  🧩 Word tutanakları tek dosyada birleştirilecek (yalnızca .docx).", "info")
+        devam_doc = (devam_sayfasi_hazirla(devam_sablon, donem, log_cb)
+                     if (word_iste and devam_sablon) else None)
         log_cb(f"{'─'*50}", "info")
 
         unvan_col = sutun_bul(list(df.columns), ARA_UNVAN)
@@ -2503,12 +2913,14 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                         try:
                             if word_tek_dosya and yol_.lower().endswith('.docx'):
                                 d_, _y = _firma_docx_hazirla(yol_, grp, list(df.columns),
-                                            inceleme_dayanagi, log_cb, blok=blok_)
+                                            inceleme_dayanagi, log_cb, blok=blok_,
+                                            ek_belge=devam_doc)
                                 word_bloklar.append((sira_no, vkn, unvan, d_))
                             else:
                                 firma_word_uret(sy, grp, cikis_kl, sira_no, donem,
                                                 vkn, unvan, list(df.columns), log_cb,
-                                                inceleme_dayanagi=inceleme_dayanagi)
+                                                inceleme_dayanagi=inceleme_dayanagi,
+                                                ek_belge=devam_doc)
                             word_uretilen.append(vkn)
                             uretildi = True
                         except Exception as we:
@@ -2519,7 +2931,7 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                     # Şablonu yok → boş/yedek şablondan üret (fatura + bilinen ünvan/VKN)
                     try:
                         d_, _y = _firma_docx_hazirla(bos_sablon, grp, list(df.columns),
-                                    inceleme_dayanagi, log_cb, blok=None)
+                                    inceleme_dayanagi, log_cb, blok=None, ek_belge=devam_doc)
                         _docx_nezdinde_yaz(d_, unvan, vkn)
                         if word_tek_dosya:
                             word_bloklar.append((sira_no, vkn, unvan, d_))
@@ -2775,6 +3187,8 @@ class KDVBolmeApp:
         # Word tutanaklarını tek dosyada birleştir + eşleşmeyenler için boş şablon
         self.word_tek_dosya = tk.BooleanVar(value=bool(ayar.get("word_tek_dosya", False)))
         self._bos_sablon = ayar.get("bos_sablon") or None
+        # KİT devam sayfası (her KİT'in arkasına eklenir; ay başlıkları güncellenir)
+        self._devam_sablon = ayar.get("devam_sablon") or None
 
         self._ui()
         self._surukle_birak()
@@ -2805,6 +3219,7 @@ class KDVBolmeApp:
                     "inceleme_dayanagi": self.inceleme_dayanagi.get(),
                     "word_tek_dosya": bool(self.word_tek_dosya.get()),
                     "bos_sablon":  self._bos_sablon or "",
+                    "devam_sablon": self._devam_sablon or "",
                 }, f, ensure_ascii=False)
         except Exception:
             pass
@@ -3058,6 +3473,11 @@ class KDVBolmeApp:
         self.bos_lbl = tk.Label(bf, text=self._bos_ozet(), font=('Segoe UI',8),
                                 bg=KART, fg=GRI, anchor='w')
         self.bos_lbl.pack(side='left', padx=(8,0), fill='x', expand=True)
+        df_ = tk.Frame(blok, bg=KART); df_.pack(fill='x', pady=(4,0))
+        self._buton(df_, "KİT devam sayfası…", self._devam_sablon_sec).pack(side='left')
+        self.devam_lbl = tk.Label(df_, text=self._devam_ozet(), font=('Segoe UI',8),
+                                  bg=KART, fg=GRI, anchor='w')
+        self.devam_lbl.pack(side='left', padx=(8,0), fill='x', expand=True)
 
     def _word_blok_guncelle(self):
         """Çıktı türü Word/İkisi ise Word Şablon bloğunu göster, değilse gizle."""
@@ -3226,6 +3646,22 @@ class KDVBolmeApp:
             return f"→ {Path(self._bos_sablon).name}"
         return "(seçilmedi)"
 
+    def _devam_ozet(self):
+        if self._devam_sablon:
+            return f"→ {Path(self._devam_sablon).name}"
+        return "(eklenmez)"
+
+    def _devam_sablon_sec(self):
+        d = filedialog.askopenfilename(
+            title="Her KİT'in arkasına eklenecek devam sayfasını seçin (İptal → eklenmez)",
+            filetypes=[("Word", "*.doc *.docx"), ("Tümü", "*.*")])
+        self._devam_sablon = d or None
+        try:
+            self.devam_lbl.config(text=self._devam_ozet())
+        except Exception:
+            pass
+        self._ayar_kaydet()
+
     def _bos_sablon_sec(self):
         d = filedialog.askopenfilename(
             title="Eşleşmeyen firmalar için boş .docx şablonu seçin",
@@ -3291,6 +3727,7 @@ class KDVBolmeApp:
         inceleme_dayanagi = self.inceleme_dayanagi.get().strip()
         word_tek_dosya = bool(self.word_tek_dosya.get())
         bos_sablon = self._bos_sablon
+        devam_sablon = self._devam_sablon
         # Word gereken modda şablon klasörü şart; yoksa kullanıcıyı uyar
         sablon_klasor = self._sablon_klasor if cikti_turu in ('word', 'ikisi') else None
         if cikti_turu in ('word', 'ikisi') and not sablon_klasor:
@@ -3318,12 +3755,13 @@ class KDVBolmeApp:
             target=self._batch_worker,
             args=(gecerli, esik_tek, esik_toplam, yuzde80, pdf_uret, sablon_klasor,
                   cikti_turu, inceleme_dayanagi, word_tek_dosya, bos_sablon),
+            kwargs={'devam_sablon': devam_sablon},
             daemon=True
         ).start()
 
     def _batch_worker(self, dosyalar, esik_tek, esik_toplam, yuzde80, pdf_uret,
                       sablon_klasor=None, cikti_turu='ikisi', inceleme_dayanagi=None,
-                      word_tek_dosya=False, bos_sablon=None):
+                      word_tek_dosya=False, bos_sablon=None, devam_sablon=None):
         toplam_b = 0; toplam_h = 0; son_klasor = None
         toplam_sec = 0; toplam_sablonsuz = 0; toplam_gecersiz = 0; son_kapsam = None
         n = len(dosyalar)
@@ -3339,7 +3777,8 @@ class KDVBolmeApp:
                                self._log, _tamam_ic, self._ilerleme,
                                self._cikis_kok, pdf_uret, sablon_klasor, cikti_turu,
                                inceleme_dayanagi or None,
-                               word_tek_dosya=word_tek_dosya, bos_sablon=bos_sablon)
+                               word_tek_dosya=word_tek_dosya, bos_sablon=bos_sablon,
+                               devam_sablon=devam_sablon)
             except Exception as e:
                 self._log(f"❌ {e}", "err")
                 sonuc.setdefault('h', 1)   # beklenmeyen hata 'firma yok' sanılmasın

@@ -12,6 +12,7 @@ xlrd>=2.0,<3            # yalnızca eski .xls okuma (2.x sadece .xls destekler �
 pillow>=9.1,<14         # GUI logosu (Image.thumbnail/LANCZOS — kod iki sürümü de destekler)
 olefile>=0.46,<1        # hazır .doc (eski ikili) şablonlardan VKN okuma
 python-docx>=0.8.11,<2  # .docx şablon okuma VE yazma (Word gerektirmeden tutanak üretir)
+docxcompose>=1.4,<3     # KİT devam sayfası / tek dosya birleştirme: stilleri (tablo kenarlıkları) taşır
 
 # Opsiyonel — kurulu değilse program çalışır, sadece ilgili özellik devre dışı:
 reportlab>=3.6,<6                         # "PDF kopya da üret" seçeneği için
