@@ -237,7 +237,9 @@ Test sayısı: 96 (oturum başı) → 181.
 - [ ] **Depo gizliliği:** main'in ve bu dalın eski commit'lerinde/commit mesajlarında
       gerçek firma adları ve bazı VKN'ler var (önceki oturumlardan da). Kullanıcıya
       seçenekler soruldu: depoyu private yapmak (GitHub Pages ücretsiz planda kapanır)
-      ve/veya bu dalın geçmişini temizleyip zorla göndermek. Cevaba göre ilerle.
+      ve/veya bu dalın geçmişini temizleyip zorla göndermek. Kullanıcı **tercih
+      belirtmedi** → geçmişe dokunulmadı (güncel dosyalar temiz). Kullanıcı açıkça
+      istemeden geçmiş yeniden yazılmaz / zorla gönderilmez.
 
 ---
 
