@@ -631,7 +631,8 @@ def test_gui_kurulur_ve_callbackler_tanimli():
               "_sablon_ozet", "_kriter_al", "_ilerleme", "_tamam", "_log",
               "_ayar_kaydet", "_birak_guncelle", "_dnd_ayikla",
               "_dosya_sec", "_olustur_tikla", "_segment_sec", "_kapsam_kaydir",
-              "_log_ac_kapa", "_metrik_guncelle", "_word_blok_guncelle"]:
+              "_log_ac_kapa", "_metrik_guncelle", "_word_blok_guncelle",
+              "_firma_tara", "_tarama_bitti", "_plan_penceresi", "_olustur_metni"]:
         assert callable(getattr(app, m)), f"Eksik/çağrılamaz metot: {m}"
 
 
@@ -1318,3 +1319,325 @@ def test_blok_vkn_tek_satir_telefon_atlanir():
     blok = ("Ünvanı\tX A.Ş.\tVergi Dairesi/Hesap Nosu\tKADIKÖY / 493 061 9102\t"
             "Telefon/Fax\t0 216 000 00 00")
     assert exay._blok_vkn(blok) == "4930619102"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Firma bazlı çıktı seçimi: listeyi tara → firma başına Excel/Word/İkisi
+#  (Word'ün türü YMM / K.İ.T. şablondan otomatik gelir)
+# ══════════════════════════════════════════════════════════════════════════
+def _firma_bazli_kurulum(tmp_path):
+    """B (600 bin, 1. sıra) için YMM yazısı, A (200 bin, 2. sıra) için K.İ.T. şablonu."""
+    yol = tmp_path / "NISAN_2026.xlsx"
+    _yeni_gib_yaz(yol)
+    sk = tmp_path / "sablonlar"; sk.mkdir()
+    _ymm_yazi_docx_yaz(sk / "b_ymm.docx", "FIRMA B", "V.D. – 1000000002")
+    _docx_sablon_yaz(sk / "a_kit.docx", "FIRMA A", "V.D. 1000000001")
+    return yol, sk
+
+
+def _plan_raporu(kl, donem="04_2026"):
+    wb = openpyxl.load_workbook(kl / f"CIKTI_PLANI_{donem}.xlsx")
+    ws = wb.active
+    return {ws.cell(r, 2).value: (ws.cell(r, 1).value, ws.cell(r, 4).value,
+                                  ws.cell(r, 5).value, ws.cell(r, 6).value)
+            for r in range(2, ws.max_row + 1)}
+
+
+def test_listeyi_tara_sablon_tipi_ve_varsayilan(tmp_path):
+    yol, sk = _firma_bazli_kurulum(tmp_path)
+    (sk / "a_kit.docx").unlink()                    # A'nın şablonu YOK
+    donem, plan = exay.listeyi_tara(str(yol), 150000, 450000, 80, sablon_klasor=str(sk))
+    assert donem == "04.2026"
+    assert [p["vkn"] for p in plan] == ["1000000002", "1000000001"]   # büyükten küçüğe
+    b, a = plan
+    assert (b["sira"], b["sablon"], b["cikti"]) == (1, "YMM", "word")   # şablonu var → Word
+    assert (a["sira"], a["sablon"], a["cikti"]) == (2, None, "excel")   # şablon yok → Excel
+    assert b["toplam"] == 600000 and b["fatura"] == 2
+    assert not (tmp_path / "Hazır Tutanaklar").exists()                  # tarama dosya ÜRETMEZ
+
+
+def test_listeyi_tara_kit_tipi_ve_kayitli_tercih(tmp_path):
+    yol, sk = _firma_bazli_kurulum(tmp_path)
+    _, plan = exay.listeyi_tara(str(yol), 150000, 450000, 80, sablon_klasor=str(sk),
+                                tercihler={"1000000002": "excel", "1000000001": "ikisi"})
+    tip = {p["vkn"]: (p["sablon"], p["cikti"]) for p in plan}
+    assert tip["1000000001"] == ("K.İ.T.", "ikisi")      # kayıtlı tercih öncelikli
+    assert tip["1000000002"] == ("YMM", "excel")
+
+
+def test_listeyi_tara_secimi_normal_akisla_ayni(tmp_path):
+    """Tarama, iş kuralını (§2) değiştirmez: seçilen firmalar firmalari_filtrele ile aynı."""
+    yol, sk = _firma_bazli_kurulum(tmp_path)
+    _, plan = exay.listeyi_tara(str(yol), 150000, 450000, 80)
+    sec, _ = exay.firmalari_filtrele(exay.ana_listeyi_oku(str(yol)), 150000, 450000, 80, _sessiz)
+    assert [p["vkn"] for p in plan] == list(sec.keys())
+
+
+def test_firma_bazli_uretim_excel_ve_word_ayri(tmp_path):
+    yol, sk = _firma_bazli_kurulum(tmp_path)
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        sablon_klasor=str(sk),
+                        firma_cikti={"1000000002": "word", "1000000001": "excel"})
+    kl = tmp_path / "Hazır Tutanaklar"
+    adlar = [p.name for p in kl.iterdir()]
+    # B (1. sıra) → yalnız Word, türü şablondan: YMM yazısı
+    assert any(n.startswith("1) YMM FIRMA B") and n.endswith(".docx") for n in adlar), adlar
+    assert not any(n.startswith("1) ") and n.endswith(".xlsx") for n in adlar)
+    # A (2. sıra) → yalnız Excel
+    assert any(n.startswith("2) ") and "1000000001" in n and n.endswith(".xlsx") for n in adlar)
+    assert not any(n.endswith(".docx") and "FIRMA A" in n for n in adlar)
+    rap = _plan_raporu(kl)
+    assert rap["1000000002"] == (1, "YMM", "Word", "Word (YMM)")
+    assert rap["1000000001"] == (2, "K.İ.T.", "Excel", "Excel")
+
+
+def test_firma_bazli_ikisi_kit(tmp_path):
+    yol, sk = _firma_bazli_kurulum(tmp_path)
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        sablon_klasor=str(sk),
+                        firma_cikti={"1000000002": "excel", "1000000001": "ikisi"})
+    kl = tmp_path / "Hazır Tutanaklar"
+    adlar = [p.name for p in kl.iterdir()]
+    # A → Excel + K.İ.T. tutanağı (YMM öneki YOK)
+    assert any(n.startswith("2) ") and n.endswith(".xlsx") for n in adlar)
+    assert any(n.startswith("2) FIRMA A") and n.endswith(".docx") for n in adlar), adlar
+    assert _plan_raporu(kl)["1000000001"][3] == "Excel + Word (K.İ.T.)"
+
+
+def test_firma_bazli_word_sablonsuz_excele_duser(tmp_path):
+    """Word seçilen ama şablonu olmayan firma KAYBOLMAMALI: Excel üretilir + uyarı."""
+    yol = tmp_path / "NISAN_2026.xlsx"
+    _yeni_gib_yaz(yol)
+    bos_kl = tmp_path / "bos_klasor"; bos_kl.mkdir()
+    loglar = []
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, lambda m, t='': loglar.append(m),
+                        lambda *a: None, sablon_klasor=str(bos_kl),
+                        firma_cikti={"1000000002": "word", "1000000001": "word"})
+    kl = tmp_path / "Hazır Tutanaklar"
+    adlar = [p.name for p in kl.iterdir()]
+    # İkisi de Excel aldı ve numaralar ardışık (1, 2) — atlama yok
+    assert any(n.startswith("1) ") and "1000000002" in n and n.endswith(".xlsx") for n in adlar)
+    assert any(n.startswith("2) ") and "1000000001" in n and n.endswith(".xlsx") for n in adlar)
+    rap = _plan_raporu(kl)
+    assert all(v[3] == "Excel (Word yerine)" for v in rap.values())
+    assert any("yerine Excel" in m for m in loglar)
+
+
+def test_firma_bazli_sablon_klasoru_hic_yok(tmp_path):
+    yol = tmp_path / "NISAN_2026.xlsx"
+    _yeni_gib_yaz(yol)
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        firma_cikti={"1000000002": "word", "1000000001": "excel"})
+    kl = tmp_path / "Hazır Tutanaklar"
+    adlar = [p.name for p in kl.iterdir()]
+    assert sum(1 for n in adlar if n[0].isdigit() and n.endswith(".xlsx")) == 2
+    assert _plan_raporu(kl)["1000000002"][1] == "Yok"
+
+
+def test_normal_mod_cikti_plani_yazmaz(tmp_path):
+    """Eski (genel) çıktı türü akışı değişmedi; firma bazlı rapor üretilmez."""
+    yol, sk = _firma_bazli_kurulum(tmp_path)
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        sablon_klasor=str(sk), cikti_turu='ikisi')
+    kl = tmp_path / "Hazır Tutanaklar"
+    assert not list(kl.glob("CIKTI_PLANI_*.xlsx"))
+    assert len([p for p in kl.glob("*.xlsx") if p.name[0].isdigit()]) == 2
+
+
+# ── Firma bazlı mod: arayüz (başsız; tkinter MagicMock) ──
+class _Var:
+    """tk.StringVar/BooleanVar yerine basit değer tutucu (başsız GUI testleri için)."""
+    def __init__(self, v): self.v = v
+    def get(self): return self.v
+    def set(self, v): self.v = v
+
+
+def _gui_app(monkeypatch, tmp_path, cikti='firma'):
+    from unittest.mock import MagicMock
+    monkeypatch.setattr(exay, "AYAR_YOLU", tmp_path / "ayar.json")
+    app = exay.KDVBolmeApp(MagicMock(name="root"))
+    for ad, v in [("esik_tek", "150000"), ("esik_toplam", "450000"), ("yuzde80", "80"),
+                  ("pdf_uret", False), ("cikti_turu", cikti), ("inceleme_dayanagi", ""),
+                  ("word_tek_dosya", False)]:
+        setattr(app, ad, _Var(v))
+    return app
+
+
+def _ornek_plan():
+    return [
+        {'sira': 1, 'vkn': '1000000002', 'unvan': 'FIRMA B', 'toplam': 600000.0,
+         'fatura': 2, 'sablon': 'YMM', 'cikti': 'word'},
+        {'sira': 2, 'vkn': '1000000001', 'unvan': 'FIRMA A', 'toplam': 200000.0,
+         'fatura': 1, 'sablon': None, 'cikti': 'excel'},
+    ]
+
+
+def test_plan_hucre_ve_ozet_metinleri():
+    M = exay.KDVBolmeApp._plan_cikti_metni
+    assert M({'cikti': 'word', 'sablon': 'YMM'}) == "Word  (YMM)"
+    assert M({'cikti': 'ikisi', 'sablon': 'K.İ.T.'}) == "Excel + Word  (K.İ.T.)"
+    assert M({'cikti': 'excel', 'sablon': 'K.İ.T.'}) == "Excel"
+    assert "şablon yok → Excel" in M({'cikti': 'word', 'sablon': None})
+    oz = exay.KDVBolmeApp._plan_ozet(_ornek_plan())
+    assert "2 firma" in oz and "1 Excel" in oz and "1 Word" in oz and "1 YMM" in oz
+    plan = _ornek_plan(); plan[1]['cikti'] = 'word'
+    assert "1 Word seçiminin şablonu yok" in exay.KDVBolmeApp._plan_ozet(plan)
+
+
+def test_gui_plan_penceresi_onay_uretime_gecer(monkeypatch, tmp_path):
+    app = _gui_app(monkeypatch, tmp_path)
+    yakalanan = {}
+    monkeypatch.setattr(app, "_isle_coklu",
+                        lambda d, firma_cikti=None, kriter=None, hazir_sablon_index=None:
+                        yakalanan.update(d=d, fc=firma_cikti, k=kriter, idx=hazir_sablon_index))
+    plan = _ornek_plan()
+    indeks = {'1000000002': ('/x/b.docx', None)}
+    pen = app._plan_penceresi("NISAN_2026.xlsx", (150000.0, 450000.0, 80.0), "04.2026", plan,
+                              sablon_index=indeks)
+    # tıklama döngüsü: Excel → Word → İkisi → Excel
+    iid = next(iter(pen._satir)); p = pen._satir[iid]; once = p['cikti']
+    pen._dongu(iid)
+    S = exay.CIKTI_SECENEKLERI
+    assert p['cikti'] == S[(S.index(once) + 1) % len(S)]
+    plan[0]['cikti'] = 'word'; plan[1]['cikti'] = 'ikisi'
+    app._isleniyor = True                 # başka iş sürerken onay: seçim kaybolmamalı
+    pen._onayla()
+    assert yakalanan == {}
+    app._isleniyor = False
+    pen._onayla()
+    assert yakalanan['idx'] is indeks                         # tarama indeksi yeniden kullanılır
+    assert yakalanan['d'] == ["NISAN_2026.xlsx"]
+    assert yakalanan['fc'] == {'1000000002': 'word', '1000000001': 'ikisi'}
+    assert yakalanan['k'] == (150000.0, 450000.0, 80.0)      # taramadaki kriter AYNEN
+
+
+def test_gui_firma_tercihleri_kalici(monkeypatch, tmp_path):
+    app = _gui_app(monkeypatch, tmp_path)
+    monkeypatch.setattr(app, "_isle_coklu", lambda *a, **k: None)
+    plan = _ornek_plan(); plan[1]['cikti'] = 'ikisi'
+    app._plan_penceresi("L.xlsx", (150000.0, 450000.0, 80.0), "04.2026", plan)._onayla()
+    # yeni açılan program kayıtlı tercihleri yükler → sonraki tarama öntanımlısı
+    from unittest.mock import MagicMock
+    app2 = exay.KDVBolmeApp(MagicMock(name="root"))
+    assert app2._firma_tercih == {'1000000002': 'word', '1000000001': 'ikisi'}
+
+
+def test_gui_olustur_firma_modunda_once_tarar(monkeypatch, tmp_path):
+    app = _gui_app(monkeypatch, tmp_path, cikti='firma')
+    cagri = []
+    monkeypatch.setattr(app, "_firma_tara", lambda d: cagri.append(('tara', d)))
+    monkeypatch.setattr(app, "_isle_coklu", lambda d, **k: cagri.append(('isle', d)))
+    app._secili_dosyalar = ["L.xlsx"]
+    app._olustur_tikla()
+    app.cikti_turu.set('excel')
+    app._olustur_tikla()
+    assert cagri == [('tara', ["L.xlsx"]), ('isle', ["L.xlsx"])]
+
+
+def test_gui_tarama_bitti_pencere_ya_da_uyari(monkeypatch, tmp_path):
+    app = _gui_app(monkeypatch, tmp_path)
+    acilan = []
+    monkeypatch.setattr(app, "_plan_penceresi", lambda *a, **k: acilan.append(a))
+    app._tarama_bitti("L.xlsx", (1.0, 2.0, 80.0), "04.2026", [])          # firma yok
+    app._tarama_bitti("L.xlsx", (1.0, 2.0, 80.0), None, [], hata="bozuk")   # hata
+    assert acilan == []
+    app._tarama_bitti("L.xlsx", (1.0, 2.0, 80.0), "04.2026", _ornek_plan())
+    assert len(acilan) == 1 and app._isleniyor is False
+
+
+def test_gui_firma_tara_gercek_liste(monkeypatch, tmp_path):
+    """Uçtan uca (GUI mantığı): tarama gerçek listeyi okur, plan penceresine gider."""
+    yol, sk = _firma_bazli_kurulum(tmp_path)
+    app = _gui_app(monkeypatch, tmp_path)
+    app._sablon_klasor = str(sk)
+    acilan = []
+    monkeypatch.setattr(app, "_plan_penceresi",
+                        lambda d, k, donem, plan, sablon_index=None:
+                        acilan.append((plan, sablon_index)))
+    # thread yerine aynı akışta çalıştır; root.after hemen çalışsın
+    monkeypatch.setattr(exay.threading, "Thread",
+                        lambda target, daemon=True: type("T", (), {"start": lambda s: target()})())
+    app.root.after = lambda ms, f: f()
+    app._firma_tara([str(yol)])
+    plan, indeks = acilan[0]
+    assert [(p['vkn'], p['sablon'], p['cikti']) for p in plan] == [
+        ('1000000002', 'YMM', 'word'), ('1000000001', 'K.İ.T.', 'word')]
+    assert set(indeks) == {'1000000002', '1000000001'}       # üretime taşınacak indeks
+
+
+# ── Firma bazlı mod: kod incelemesi bulgularına karşı regresyon testleri ──
+def test_firma_bazli_bos_sablon_pencere_ile_uretim_tutarli(tmp_path):
+    """Boş şablon seçiliyse, şablonu olmayan firmada Word seçimi pencerede
+    '(boş şablon)' görünmeli ve üretimde de BOŞ.docx üretilmeli (söylenen = yapılan)."""
+    yol, sk = _firma_bazli_kurulum(tmp_path)
+    (sk / "a_kit.docx").unlink()                       # A'nın şablonu yok
+    bos = tmp_path / "bos.docx"
+    _docx_sablon_yaz(bos, "", "")
+    _, plan = exay.listeyi_tara(str(yol), 150000, 450000, 80, sablon_klasor=str(sk),
+                                bos_sablon=str(bos))
+    a = next(p for p in plan if p['vkn'] == '1000000001')
+    assert a['sablon'] is None and a['bos'] is True
+    a['cikti'] = 'word'
+    metin = exay.KDVBolmeApp._plan_cikti_metni(a)
+    assert metin == "Word  (boş şablon)" and "⚠" not in metin
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a_: None,
+                        sablon_klasor=str(sk), bos_sablon=str(bos),
+                        firma_cikti={p['vkn']: p['cikti'] for p in plan})
+    kl = tmp_path / "Hazır Tutanaklar"
+    adlar = [p.name for p in kl.iterdir()]
+    assert any(n.startswith("2) ") and n.endswith("BOŞ.docx") for n in adlar), adlar
+    assert _plan_raporu(kl)["1000000001"][3] == "Word (boş şablon)"
+
+
+def test_firma_bazli_hazir_indeks_klasoru_yeniden_taramaz(tmp_path, monkeypatch):
+    yol, sk = _firma_bazli_kurulum(tmp_path)
+    indeks = {}
+    _, plan = exay.listeyi_tara(str(yol), 150000, 450000, 80, sablon_klasor=str(sk),
+                                indeks_disari=indeks)
+    assert set(indeks) == {'1000000001', '1000000002'}
+    def _yasak(*a, **k):
+        raise AssertionError("şablon klasörü ikinci kez tarandı")
+    monkeypatch.setattr(exay, "sablonlari_indeksle", _yasak)
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        sablon_klasor=str(sk), hazir_sablon_index=indeks,
+                        firma_cikti={'1000000002': 'word', '1000000001': 'ikisi'})
+    rap = _plan_raporu(tmp_path / "Hazır Tutanaklar")
+    assert rap['1000000002'][3] == "Word (YMM)"
+    assert rap['1000000001'][3] == "Excel + Word (K.İ.T.)"
+
+
+def test_firma_bazli_hepsi_excel_klasoru_taramaz(tmp_path, monkeypatch):
+    """Tüm firmalar Excel ise (ve hazır indeks yoksa) şablon klasörü taranmaz —
+    birleşik .doc için Word gereksiz yere açılmasın."""
+    yol, sk = _firma_bazli_kurulum(tmp_path)
+    def _yasak(*a, **k):
+        raise AssertionError("Word istenmediği halde şablonlar tarandı")
+    monkeypatch.setattr(exay, "sablonlari_indeksle", _yasak)
+    exay.dosyalari_isle(str(yol), 150000, 450000, 80, _sessiz, lambda *a: None,
+                        sablon_klasor=str(sk),
+                        firma_cikti={'1000000002': 'excel', '1000000001': 'excel'})
+    rap = _plan_raporu(tmp_path / "Hazır Tutanaklar")
+    assert rap['1000000002'][1] == "— (taranmadı)" and rap['1000000002'][3] == "Excel"
+
+
+def test_sablon_tipi_okunamayan_kit_sayilmaz(tmp_path):
+    bozuk = tmp_path / "bozuk.docx"
+    bozuk.write_bytes(b"bu bir docx degil")
+    assert exay.sablon_tipi((str(bozuk), None)) == "Bilinmiyor"
+    assert exay._sablon_ymm_mi(str(bozuk)) is False       # dosya adı öneki için eski davranış
+    assert exay.sablon_tipi(None) is None
+
+
+def test_sablon_tipi_onbellek(tmp_path, monkeypatch):
+    yol = tmp_path / "y.docx"
+    _ymm_yazi_docx_yaz(yol, "X A.Ş.", "V.D. – 1234567890")
+    sayac = {'n': 0}
+    asil = exay._docx_metni_oku
+    def _say(p):
+        sayac['n'] += 1
+        return asil(p)
+    monkeypatch.setattr(exay, "_docx_metni_oku", _say)
+    assert exay.sablon_tipi((str(yol), None)) == "YMM"
+    assert exay.sablon_tipi((str(yol), None)) == "YMM"
+    assert exay._sablon_ymm_mi(str(yol)) is True
+    assert sayac['n'] == 1                                 # dosya bir kez okundu

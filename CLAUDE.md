@@ -114,6 +114,9 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
   biçim için de saf Python'dur (`.doc`→olefile, `.docx`→python-docx).
 - `WORD_ESLESME_DÖNEM.xlsx` — hangi seçili firmanın şablonu var/yok ve Word
   tutanağının üretilip üretilmediği (Word olmadan da çıkarılır).
+- `CIKTI_PLANI_DÖNEM.xlsx` — **yalnız "Firma bazlı" modda**: her firma için Sıra No,
+  VKN, Ünvan, Şablon Tipi (YMM / K.İ.T. / Yok / okunamadı), Seçilen Çıktı ve
+  gerçekten Üretilen (ör. "Excel (Word yerine)", "Word (YMM)", "Excel + Word (K.İ.T.)").
 
 ---
 
@@ -157,8 +160,10 @@ Kritik biçimlendirme kuralları (hepsi geçmiş hataların dersleridir):
 | `firmalari_filtrele` | **KALP.** VKN normalize, geçerli/geçersiz ayrım, 2 aşamalı %80 seçimi. |
 | `guvenli_kaydet` / `_dosya_kilitli_mesaji` | Windows uzun yol (~260) sorununda dosya adını kısaltarak yeniden kaydeder. Çıktı dosyası Excel/Word'de AÇIKSA (PermissionError) net Türkçe mesajla yükseltir — farklı adla sessizce kaydetmez. `.docx` karşılığı `_guvenli_docx_kaydet`; yan raporlar da bu yoldan kaydedilir. |
 | `firma_excel_olustur` | Tek firmanın tutanak Excel'ini şablona göre yazar. |
-| `dosyalari_isle` | Orkestrasyon: oku → **ön bilgi + doğruluk uyarıları** → filtrele → her firma için üret → yan dosyalar + kalıcı günlük. Opsiyonel `ilerleme_cb`, `cikis_kok`, `pdf_uret`, `sablon_klasor`, **`cikti_turu`** ('excel'/'word'/'ikisi'). Ardışık numara yalnızca üretilen firmalar için. |
-| `KDVBolmeApp` | Tkinter GUI (sürükle-bırak **çoklu/toplu**, eşik + **doğrulama**, **çıktı türü seçici**, çıktı klasörü, PDF onayı, Word şablon klasörü, ilerleme çubuğu, log, logo, ayarları hatırlama). |
+| `dosyalari_isle` | Orkestrasyon: oku → **ön bilgi + doğruluk uyarıları** → filtrele → her firma için üret → yan dosyalar + kalıcı günlük. Opsiyonel `ilerleme_cb`, `cikis_kok`, `pdf_uret`, `sablon_klasor`, **`cikti_turu`** ('excel'/'word'/'ikisi'), **`firma_cikti`** ({vkn: 'excel'/'word'/'ikisi'} — firma bazlı mod), **`hazir_sablon_index`** (taramanın indeksi; klasör yeniden taranmaz). Ardışık numara yalnızca üretilen firmalar için. |
+| `listeyi_tara` | **Firma bazlı mod ön taraması — DOSYA ÜRETMEZ.** Okur, `firmalari_filtrele` ile seçer (§2 AYNEN), şablonları eşler; her firma için {sira, vkn, unvan, toplam, fatura, sablon ('YMM'/'K.İ.T.'/'Bilinmiyor'/None), bos, cikti} planı döner. Varsayılan çıktı: kayıtlı tercih → yoksa şablonu olan 'word', olmayan 'excel'. `indeks_disari` ile şablon indeksini dışarı verir. |
+| `sablon_tipi` / `_sablon_ymm_durum` / `bos_sablon_kullanilabilir` | Şablonun belge tipi (YMM yazısı / K.İ.T. / okunamadı→'Bilinmiyor', sessizce K.İ.T. sayılmaz). Tip, dosya değişmedikçe **önbellekten** gelir (birleşik .docx'i tekrar tekrar açmamak için). Boş şablonun kullanılabilirliği tek yerde. |
+| `KDVBolmeApp` | Tkinter GUI (sürükle-bırak **çoklu/toplu**, eşik + **doğrulama**, **çıktı türü seçici** Excel/Word/İkisi/**Firma bazlı**, çıktı klasörü, PDF onayı, Word şablon klasörü, ilerleme çubuğu, log, logo, ayarları hatırlama). Firma bazlı: `_firma_tara` (arka planda `listeyi_tara`) → `_plan_penceresi` (MODAL seçim penceresi) → `_isle_coklu(firma_cikti=…, kriter=…, hazir_sablon_index=…)`. Ana alan **kaydırılabilir** (`_kanvas`, `_kaydirma_guncelle`, `_tekerlek`, `_pencereyi_sigdir`). |
 
 Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 (her firma) `firma_excel_olustur` → `guvenli_kaydet`.
@@ -195,7 +200,7 @@ Akış: `dosyalari_isle` → `ana_listeyi_oku` → `firmalari_filtrele` →
 yöntemini otomatikleştirir). Çalıştırma:
 
 ```bash
-pytest -q        # 96 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
+pytest -q        # 115 test: para_deger/tarih, kdv/seri/donem bulma, %80 kuralı,
                  # VKN normalizasyon, üç liste tipi (yeni/eski GİB + muhasebe),
                  # CSV okuma, kriter doğrulama, doğruluk uyarıları (kdv/mükerrer/
                  # dönem-dışı), şablon çıktı, özet, PDF, kalıcı günlük, uçtan uca
@@ -240,7 +245,7 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
 - Geçersiz kimlikli satırlar tutanaklanamaz; kullanıcı kaynak listede
   düzeltirse kapsam iyileşir (program uyarıyor).
 - ~~GUI'de ilerleme çubuğu yok~~ → **eklendi** (firma sayısına göre dolar).
-- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 96 test).
+- ~~Otomatik test paketi yok~~ → **eklendi** (`pytest`, `test_exay.py`, 115 test).
 - ~~İşlem öncesi önizleme/uyarı yok~~ → **eklendi** (ÖN BİLGİ bloğu + KDV
   tutarlılık, mükerrer fatura, dönem-dışı tarih uyarıları — hepsi yalnızca
   uyarır, seçimi/iş kuralını etkilemez).
@@ -311,3 +316,27 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
   sayısı/başlık satırı sayısına göre ince ayar gerekebilir (`firma_word_olustur`
   loglu yazılmıştır). Miktar sütunu kaynak listeden alınır (`sutun_bul(['miktar'])`);
   liste düzeni netleştikçe eşleme gözden geçirilmeli.
+
+- **Firma bazlı çıktı seçimi (`cikti_turu='firma'`):** "LİSTEYİ TARA — FİRMALARI SEÇ"
+  → liste taranır (dosya üretilmez) → modal pencerede seçilen her firma için
+  Excel / Word / Excel+Word seçilir ('Çıktı' hücresine tık, çift tık, boşluk tuşu
+  ya da toplu düğmeler). **Word'ün türü firmanın şablonundan otomatik gelir**
+  (YMM yazısı / K.İ.T.); kullanıcı tür seçmez. Seçimler `~/.exay_ayarlar.json`
+  içinde `firma_tercih` olarak saklanır → sonraki ay aynı firmalar aynı seçimle gelir.
+  Tarama ile üretim **aynı kriterle** (taramadaki) ve **aynı şablon indeksiyle**
+  yapılır. Tek liste dosyasıyla çalışır (çoklu dosyada Excel/Word/İkisi modları).
+  **Firma kaybolmaz:** yalnız Word seçilip Word üretilemeyen firma (şablon yok ve
+  boş şablon yok / üretim hatası) için Excel tutanağı yedek olarak üretilir ve
+  uyarılır; pencere bunu önceden "⚠ şablon yok → Excel" diye gösterir. Boş şablon
+  seçiliyse şablonsuz firmada Word = boş şablondan (pencere "(boş şablon)" der).
+  **Numaralandırma (bilinçli karar):** `N)` numarası FİRMA sırasıdır ve Excel/Word
+  ayrımı gözetmeden 1'den ardışıktır (VKN_LISTESI ve CIKTI_PLANI ile birebir).
+  Bu yüzden yalnız Excel dosyalarına bakınca numara atlanmış görünebilir (o firma
+  Word almıştır). Excel ve Word'ün ayrı ayrı 1'den numaralanması istenirse bu bir
+  §2.4 kararıdır — kullanıcıya danışılmadan değiştirilmez.
+  Eski Excel/Word/İkisi modlarının davranışı DEĞİŞMEDİ (yedek Excel yalnız firma modunda).
+- **Ana pencere kaydırılabilir:** Word ayarları/günlük açıkken içerik 650 px'e
+  sığmıyordu (Word/İkisi modunda ana buton pencere dışında kalıyordu). Ana alan
+  Canvas içinde; pencere açılışta/mod değişince içeriğe göre ekranı aşmadan uzar
+  (`_pencereyi_sigdir`), sığmazsa kaydırma çubuğu çıkar. Görsel doğrulama:
+  Xvfb + python3.12-tk ile gerçek pencere çizilip ekran görüntüsü alınabilir.
