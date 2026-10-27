@@ -38,7 +38,7 @@ except ImportError:
                            'pandas','openpyxl','xlrd','--quiet'])
     import pandas as pd, openpyxl
 
-SURUM = "5.1"   # GUI başlığında ve özet raporda gösterilir
+SURUM = "5.2"   # GUI başlığında ve özet raporda gösterilir
 
 SABLON_SUTUNLAR = [
     "Faturanın Tarihi","Faturanın Serisi","Faturanın Numarası",
@@ -72,6 +72,9 @@ ARA_KDVYEDEK = ['toplam indirilecek kdv', 'indirilecek kdv']        # kdv_sutunu
 ARA_UNVAN    = ['satıcının adı', 'satıcı unvan', 'ünvan', 'unvan']
 ARA_CINS     = ['alınan mal ve/veya hizmetin cins', 'hizmetin cins', 'malın cins', 'cinsi']
 ARA_MIKTAR   = ['hizmetin miktar', 'malın miktar', 'miktar']
+
+# Kabul edilen liste dosyası uzantıları (GUI seçim/sürükle-bırak/tarama)
+LISTE_UZANTILARI = ('.xls', '.xlsx', '.csv', '.txt')
 
 def kdv_sutunu_bul(kolonlar):
     """Faturanın KDV'si sütununu bulur. 'KDV'si', 'KDV si', 'KDVsi', 'KDV' gibi
@@ -1723,10 +1726,18 @@ def _docx_belge_metni(doc):
             parcalar.append('\t'.join(c.text for c in r.cells))
     return '\n'.join(parcalar)
 
-def _sablon_ymm_mi(yol, blok=None):
-    """Şablon YMM (Bilgi İsteme) YAZISI mı? ('Hakkında Bilgi İstenilen' geçiyorsa).
-    Değilse (karşıt inceleme tutanağı) veya okunamazsa False. Dosya adının başına
-    'YMM ' ön eki koyup koymamaya bu karar verir."""
+_SABLON_TIP_ONBELLEK = {}   # (yol, blok, değişme zamanı) → True (YMM) / False (K.İ.T.)
+
+def _sablon_ymm_durum(yol, blok=None):
+    """Şablon YMM (Bilgi İsteme) YAZISI mı? True: YMM, False: karşıt inceleme
+    tutanağı (K.İ.T.), None: okunamadı. Tarama ve üretim aynı şablonu tekrar tekrar
+    sorduğundan (birleşik .docx'te pahalı), dosya değişmedikçe sonuç önbellekten gelir."""
+    try:
+        anahtar = (str(yol), blok, os.path.getmtime(str(yol)))
+    except OSError:
+        anahtar = None
+    if anahtar is not None and anahtar in _SABLON_TIP_ONBELLEK:
+        return _SABLON_TIP_ONBELLEK[anahtar]
     try:
         low = str(yol).lower()
         if low.endswith('.docx'):
@@ -1737,8 +1748,83 @@ def _sablon_ymm_mi(yol, blok=None):
         else:
             metin = _doc_metni_oku(yol)
     except Exception:
-        return False
-    return 'hakkinda bilgi istenilen' in _ascii_kucuk(metin)
+        return None
+    sonuc = 'hakkinda bilgi istenilen' in _ascii_kucuk(metin)
+    if anahtar is not None:
+        _SABLON_TIP_ONBELLEK[anahtar] = sonuc
+    return sonuc
+
+def _sablon_ymm_mi(yol, blok=None):
+    """Şablon YMM (Bilgi İsteme) YAZISI mı? Değilse (karşıt inceleme tutanağı) ya
+    da okunamazsa False. Dosya adının başına 'YMM ' ön eki koyup koymamaya bu karar verir."""
+    return bool(_sablon_ymm_durum(yol, blok))
+
+# ── Firma bazlı çıktı seçimi ("Firma bazlı" mod) ──
+# Kullanıcı listeyi taratır, seçilen her firma için Excel / Word / İkisi seçer.
+# Word'ün türü (YMM yazısı mı K.İ.T. mi) firmanın ŞABLONUNDAN otomatik gelir.
+CIKTI_SECENEKLERI = ('excel', 'word', 'ikisi')
+CIKTI_ETIKET = {'excel': 'Excel', 'word': 'Word', 'ikisi': 'Excel + Word'}
+
+def sablon_tipi(sablon_kaydi):
+    """Eşleşen şablonun belge tipi: 'YMM' (Bilgi İsteme yazısı), 'K.İ.T.' (karşıt
+    inceleme tutanağı) ya da 'Bilinmiyor' (şablon okunamadı — sessizce K.İ.T.
+    sayılmaz). Şablon yoksa None."""
+    if not sablon_kaydi:
+        return None
+    yol, blok = _sablon_yol_blok(sablon_kaydi)
+    durum = _sablon_ymm_durum(yol, blok)
+    if durum is None:
+        return 'Bilinmiyor'
+    return 'YMM' if durum else 'K.İ.T.'
+
+def bos_sablon_kullanilabilir(bos_sablon):
+    """Boş/yedek şablon gerçekten kullanılabilir mi? (yalnız .docx + python-docx)"""
+    return bool(bos_sablon) and str(bos_sablon).lower().endswith('.docx') and docx_destekli()
+
+def listeyi_tara(kaynak, esik_tek, esik_toplam, yuzde80, sablon_klasor=None,
+                 log_cb=None, tercihler=None, bos_sablon=None, indeks_disari=None):
+    """'Firma bazlı' mod için ÖN TARAMA — HİÇBİR DOSYA ÜRETMEZ.
+    Listeyi okur, firmaları §2 kurallarıyla seçer (firmalari_filtrele; iş kuralı
+    AYNEN), şablonları VKN ile eşler ve seçilen her firma için bir plan satırı
+    döndürür. Dönüş: (donem, plan); plan büyükten küçüğe (dosya sırası):
+      {'sira','vkn','unvan','toplam','fatura','sablon','bos','cikti'}
+    'sablon': 'YMM' / 'K.İ.T.' / 'Bilinmiyor' / None.  'cikti': 'excel'/'word'/'ikisi'.
+    'bos': şablonu olmayan firma Word seçerse boş/yedek şablondan üretilecek mi.
+    Varsayılan çıktı: kayıtlı tercih (tercihler[vkn]) → yoksa şablonu olan firma
+    'word', olmayan 'excel'.
+    indeks_disari: bir sözlük verilirse şablon indeksi buna yazılır; üretimde
+    (dosyalari_isle(hazir_sablon_index=...)) yeniden kullanılır — klasör iki kez
+    taranmaz (birleşik .doc'ta Word iki kez açılmaz)."""
+    log = log_cb or (lambda *a, **k: None)
+    tercihler = tercihler or {}
+    df = ana_listeyi_oku(kaynak)
+    donem = donem_bul(Path(kaynak).stem, df)
+    secilen, _gecersiz = firmalari_filtrele(df, esik_tek, esik_toplam, yuzde80, log)
+    sablon_index = {}
+    if sablon_klasor:
+        try:
+            sablon_index = sablonlari_indeksle(sablon_klasor, log)
+        except Exception as e:
+            log(f"  ⚠️ Şablon klasörü okunamadı: {e}", "warn")
+    if indeks_disari is not None:
+        indeks_disari.update(sablon_index)
+    bos_var = bos_sablon_kullanilabilir(bos_sablon)
+    K = list(df.columns)
+    unvan_col = sutun_bul(K, ARA_UNVAN)
+    tutar_col = sutun_bul(K, ARA_MATRAH)
+    plan = []
+    for sira, (vkn, (grp, _neden)) in enumerate(secilen.items(), start=1):
+        uv = grp[unvan_col].dropna().unique() if unvan_col else []
+        unvan = str(uv[0]) if len(uv) else ''
+        toplam = (float(grp[tutar_col].apply(lambda v: para_deger(v) or 0.0).sum())
+                  if tutar_col else 0.0)
+        tip = sablon_tipi(sablon_index.get(vkn))
+        onceki = tercihler.get(vkn)
+        cikti = onceki if onceki in CIKTI_SECENEKLERI else ('word' if tip else 'excel')
+        plan.append({'sira': sira, 'vkn': vkn, 'unvan': unvan, 'toplam': toplam,
+                     'fatura': int(len(grp)), 'sablon': tip, 'bos': bos_var,
+                     'cikti': cikti})
+    return donem, plan
 
 def firma_word_uret(sablon_kaydi, firma_df, cikis_kl, sira_no, donem, vkn, unvan,
                     tum_kolonlar, log_cb=None, inceleme_dayanagi=None):
@@ -1828,7 +1914,15 @@ def ozet_rapor_olustur(df, secilen, df_gecersiz, esik_tek, esik_toplam,
 def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb,
                    ilerleme_cb=None, cikis_kok=None, pdf_uret=False,
                    sablon_klasor=None, cikti_turu='ikisi', inceleme_dayanagi=None,
-                   word_tek_dosya=False, bos_sablon=None):
+                   word_tek_dosya=False, bos_sablon=None, firma_cikti=None,
+                   hazir_sablon_index=None):
+    # hazir_sablon_index: listeyi_tara'nın çıkardığı şablon indeksi; verilirse
+    #   klasör yeniden taranmaz (aynı eşleşme kullanılır, birleşik .doc Word ile
+    #   ikinci kez dönüştürülmez).
+    # firma_cikti: {vkn: 'excel'|'word'|'ikisi'} — "Firma bazlı" mod. Verilirse
+    #   cikti_turu yerine HER FİRMA için bu seçim uygulanır (listeyi_tara ile
+    #   hazırlanır). Word'ün türü (YMM/K.İ.T.) şablondan gelir. Yalnız Word seçilip
+    #   Word üretilemeyen (şablon yok/hata) firma kaybolmaz: Excel'e düşer + uyarı.
     # word_tek_dosya: üretilen .docx tutanakları tek bir dosyada (her firma yeni
     #   sayfada) birleştir. bos_sablon: eşleşmeyen firmalar için kullanılacak boş
     #   .docx şablonu (fatura + bilinen ünvan/VKN doldurulur, gerisi kullanıcıda).
@@ -1841,8 +1935,16 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
     #   güncellenerek Word tutanağı da üretilir.
     # cikti_turu: 'excel' (yalnız Excel), 'word' (yalnız Word — şablon gerekir),
     #   'ikisi' (Excel + eşleşen firmalar için Word). Varsayılan 'ikisi'.
-    excel_iste = cikti_turu in ('excel', 'ikisi')
-    word_iste  = cikti_turu in ('word', 'ikisi') and bool(sablon_klasor)
+    firma_modu = firma_cikti is not None
+    if firma_modu:
+        firma_cikti = {str(k): (v if v in CIKTI_SECENEKLERI else 'excel')
+                       for k, v in dict(firma_cikti).items()}
+        _wsec = any(v in ('word', 'ikisi') for v in firma_cikti.values())
+        excel_iste = False   # firma modunda kullanılmaz: her firma için f_excel hesaplanır
+        word_iste  = _wsec and bool(sablon_klasor or bos_sablon_kullanilabilir(bos_sablon))
+    else:
+        excel_iste = cikti_turu in ('excel', 'ikisi')
+        word_iste  = cikti_turu in ('word', 'ikisi') and bool(sablon_klasor)
     def _ilerle(t, top):
         if ilerleme_cb:
             try: ilerleme_cb(t, top)
@@ -1959,22 +2061,39 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
             log_cb("  🧾 PDF kopyalar da üretilecek.", "info")
 
         # Çıktı türünü bildir
-        _mod = {'excel': 'yalnız Excel', 'word': 'yalnız Word',
-                'ikisi': 'Excel + (eşleşen firmalar için) Word'}.get(cikti_turu, 'Excel + Word')
+        if firma_modu:
+            _say = {k: sum(1 for v in firma_cikti.values() if v == k)
+                    for k in CIKTI_SECENEKLERI}
+            _mod = (f"FİRMA BAZLI — {_say['excel']} Excel, {_say['word']} Word, "
+                    f"{_say['ikisi']} Excel+Word (Word türü şablondan: YMM / K.İ.T.)")
+        else:
+            _mod = {'excel': 'yalnız Excel', 'word': 'yalnız Word',
+                    'ikisi': 'Excel + (eşleşen firmalar için) Word'}.get(cikti_turu, 'Excel + Word')
         log_cb(f"🧾 Çıktı türü: {_mod}", "info")
-        if cikti_turu == 'word' and not sablon_klasor:
+        if firma_modu and _wsec and not (sablon_klasor or bos_sablon):
+            log_cb("  ⚠️  Word seçilen firmalar var ama şablon klasörü/boş şablon yok — "
+                   "bu firmalar için Excel tutanağı üretilecek.", "warn")
+        if not firma_modu and cikti_turu == 'word' and not sablon_klasor:
             log_cb("  ⚠️  'Yalnız Word' seçildi ama şablon klasörü seçilmedi — "
                    "hiçbir tutanak üretilemeyecek. Lütfen şablon klasörünü seçin.", "err")
 
         # ── Word şablonları: gerekiyorsa VKN'ye göre indeksle ──
         sablon_index = {}
-        if word_iste:
+        sablon_tarandi = False   # şablon eşleşmesi biliniyor mu (rapordaki 'Yok' için)
+        if hazir_sablon_index is not None and (word_iste or firma_modu):
+            # Firma bazlı taramada çıkarılan indeks: klasör yeniden taranmaz
+            sablon_index = dict(hazir_sablon_index)
+            sablon_tarandi = True
+            log_cb(f"🗂  Şablon eşleşmesi taramadan alındı ({len(sablon_index)} şablon).", "info")
+        elif word_iste and sablon_klasor:
             log_cb(f"🗂  Word şablonları taranıyor: {sablon_klasor}", "info")
             try:
                 sablon_index = sablonlari_indeksle(sablon_klasor, log_cb)
             except Exception as e:
                 log_cb(f"  ⚠️ Şablon klasörü okunamadı: {e}", "warn")
+            sablon_tarandi = True
             log_cb(f"  {len(sablon_index)} şablon VKN ile indekslendi.", "ok")
+        if word_iste:
             if inceleme_dayanagi:
                 log_cb(f"  🗓 İnceleme Dayanağı her Word tutanağına yazılacak: "
                        f"\"{inceleme_dayanagi}\"", "info")
@@ -2007,6 +2126,7 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
         basarili  = 0; hatali = []
         vkn_sirali = []   # tutanağı oluşturulan firmaların VKN'leri (dosya sırasıyla)
         sira_no = 0       # yalnızca başarılı dosyalar için ARDIŞIK numara (atlama olmaz)
+        plan_kayit = []   # firma bazlı mod: (sıra, vkn, ünvan, şablon tipi, seçim, sonuç)
 
         toplam_firma = len(secilen)
         _ilerle(0, toplam_firma)
@@ -2023,24 +2143,40 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
             sira_no += 1              # aday numara; hiçbir çıktı üretilmezse geri alınır
             uretildi = False          # bu firma için en az bir dosya üretildi mi?
             hata_mesaji = None        # Excel/Word üretim hatası (varsa)
+            excel_ok = False          # bu firma için Excel üretildi mi?
+            word_ok = None            # üretilen Word'ün türü ('YMM'/'K.İ.T.'/'boş şablon')
+            # Bu firmanın çıktısı: firma bazlı modda kendi seçimi, değilse genel tür
+            if firma_modu:
+                secim = firma_cikti.get(str(vkn), 'excel')
+                istenen_word = secim in ('word', 'ikisi')
+                f_excel = secim in ('excel', 'ikisi')
+                f_word  = istenen_word and word_iste
+                f_tip   = sablon_tipi(sablon_index.get(vkn))
+            else:
+                secim, istenen_word, f_tip = cikti_turu, word_iste, None
+                f_excel, f_word = excel_iste, word_iste
+
+            def _excel_uret():
+                ad = f"{sira_no}) {donem.replace('.','_')}_{vkn}_{temiz}.xlsx"
+                kayitli_yol = firma_excel_olustur(grp, str(cikis_kl / ad), list(df.columns))
+                if pdf_uret:      # PDF, Excel'in okunur kopyası — hata Excel'i etkilemez
+                    try:
+                        firma_pdf_olustur(grp, str(Path(kayitli_yol).with_suffix('.pdf')),
+                                          list(df.columns), vkn=vkn, unvan=unvan, donem=donem)
+                    except Exception as pe:
+                        log_cb(f"      ⚠️ PDF üretilemedi ({vkn}): {pe}", "warn")
 
             # ── Excel tutanağı ──
-            if excel_iste:
+            if f_excel:
                 try:
-                    ad = f"{sira_no}) {donem.replace('.','_')}_{vkn}_{temiz}.xlsx"
-                    kayitli_yol = firma_excel_olustur(grp, str(cikis_kl / ad), list(df.columns))
+                    _excel_uret()
                     uretildi = True
-                    if pdf_uret:      # PDF, Excel'in okunur kopyası — hata Excel'i etkilemez
-                        try:
-                            firma_pdf_olustur(grp, str(Path(kayitli_yol).with_suffix('.pdf')),
-                                              list(df.columns), vkn=vkn, unvan=unvan, donem=donem)
-                        except Exception as pe:
-                            log_cb(f"      ⚠️ PDF üretilemedi ({vkn}): {pe}", "warn")
+                    excel_ok = True
                 except Exception as e:
                     hata_mesaji = str(e)
 
             # ── Word tutanağı (VKN ile eşleşen şablondan) ──
-            if word_iste:
+            if f_word:
                 sy = sablon_index.get(vkn)
                 if sy:
                     word_eslesen.append((vkn, unvan))
@@ -2057,11 +2193,12 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                                                 inceleme_dayanagi=inceleme_dayanagi)
                             word_uretilen.append(vkn)
                             uretildi = True
+                            word_ok = f_tip or 'Word'
                         except Exception as we:
                             log_cb(f"      ⚠️ Word tutanağı üretilemedi ({vkn}): {we}", "warn")
-                            if not excel_iste and hata_mesaji is None:
+                            if not f_excel and hata_mesaji is None:
                                 hata_mesaji = str(we)
-                elif bos_sablon and str(bos_sablon).lower().endswith('.docx') and docx_destekli():
+                elif bos_sablon_kullanilabilir(bos_sablon):
                     # Şablonu yok → boş/yedek şablondan üret (fatura + bilinen ünvan/VKN)
                     try:
                         d_, _y = _firma_docx_hazirla(bos_sablon, grp, list(df.columns),
@@ -2074,6 +2211,7 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                             _guvenli_docx_kaydet(d_, str(cikis_kl / ad))
                         bos_uretilen.append((vkn, unvan))
                         uretildi = True
+                        word_ok = 'boş şablon'
                         log_cb(f"      🆕 Boş şablondan tutanak üretildi ({vkn}) — "
                                f"firma bilgilerini fatura üzerinden kontrol edin.", "warn")
                     except Exception as be:
@@ -2081,6 +2219,24 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                         word_sablonsuz.append((vkn, unvan))
                 else:
                     word_sablonsuz.append((vkn, unvan))
+            elif firma_modu and istenen_word:
+                # Word istendi ama Word üretme imkânı yok (şablon klasörü/boş şablon yok)
+                word_sablonsuz.append((vkn, unvan))
+
+            # ── Firma bazlı: yalnız Word istenip Word üretilemediyse firma KAYBOLMASIN,
+            #    Excel tutanağı yedek olarak üretilsin (net uyarıyla) ──
+            yedek_excel = False
+            if firma_modu and istenen_word and not f_excel and not word_ok:
+                try:
+                    _excel_uret()
+                    uretildi = True
+                    excel_ok = True
+                    yedek_excel = True
+                    hata_mesaji = None
+                    log_cb(f"      ↪ {vkn}: Word üretilemedi (şablon yok ya da hata) → "
+                           f"yerine Excel tutanağı üretildi.", "warn")
+                except Exception as e:
+                    hata_mesaji = str(e)
 
             # ── Sonuç: ardışık numaralandırma yalnızca üretilen firmalar için ──
             if uretildi:
@@ -2094,6 +2250,21 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                 if hata_mesaji:
                     hatali.append((vkn, unvan, hata_mesaji))
                     log_cb(f"  ✘ HATA  {vkn}  {unvan[:30]}: {hata_mesaji}", "err")
+            if firma_modu:
+                if uretildi:
+                    parca = []
+                    if excel_ok:
+                        parca.append("Excel" + (" (Word yerine)" if yedek_excel else ""))
+                    if word_ok:
+                        parca.append(f"Word ({word_ok})")
+                    sonuc_metni = " + ".join(parca)
+                else:
+                    sonuc_metni = f"OLUŞTURULAMADI: {hata_mesaji or 'bilinmeyen hata'}"
+                plan_kayit.append((sira_no if uretildi else '', vkn, unvan,
+                                   f_tip or ('Yok' if (sablon_tarandi or not sablon_klasor)
+                                             else '— (taranmadı)'),
+                                   CIKTI_ETIKET.get(secim, secim),
+                                   sonuc_metni))
             _ilerle(islenen, toplam_firma)
 
         log_cb(f"\n{'═'*50}", "info")
@@ -2110,6 +2281,31 @@ def dosyalari_isle(kaynak, esik_tek, esik_toplam, yuzde80, _ekrana_log, tamam_cb
                        f"{Path(byol).name}", "ok")
             except Exception as e:
                 log_cb(f"⚠️ Tek dosyada birleştirilemedi: {e}", "warn")
+
+        # ── Firma bazlı mod: hangi firmaya ne seçildi / ne üretildi raporu ──
+        if firma_modu and plan_kayit:
+            try:
+                wbp = openpyxl.Workbook(); wsp = wbp.active; wsp.title = "Çıktı Planı"
+                for c, b in enumerate(["Sıra No", "Vergi/TC No", "Ünvan", "Şablon Tipi",
+                                       "Seçilen Çıktı", "Üretilen"], 1):
+                    hc = wsp.cell(1, c, value=b); hc.font = openpyxl.styles.Font(bold=True)
+                for r, (s, v, uv, tip, sec, son) in enumerate(plan_kayit, 2):
+                    wsp.cell(r, 1, value=s)
+                    wsp.cell(r, 2, value=str(v)).number_format = '@'
+                    wsp.cell(r, 3, value=str(uv))
+                    wsp.cell(r, 4, value=tip)
+                    wsp.cell(r, 5, value=sec)
+                    wsp.cell(r, 6, value=son)
+                for kol, gen in zip('ABCDEF', (8, 16, 45, 12, 15, 40)):
+                    wsp.column_dimensions[kol].width = gen
+                pyol = guvenli_kaydet(wbp, str(cikis_kl /
+                                      f"CIKTI_PLANI_{donem.replace('.','_')}.xlsx"))
+                yedekler = sum(1 for k in plan_kayit if 'Word yerine' in k[5])
+                log_cb(f"🧾 Çıktı planı: {Path(pyol).name}"
+                       + (f"  ({yedekler} firma Word yerine Excel aldı)" if yedekler else ""),
+                       "warn" if yedekler else "ok")
+            except Exception as e:
+                log_cb(f"⚠️ Çıktı planı raporu yazılamadı: {e}", "warn")
 
         # ── Word şablon eşleşme özeti + raporu ──
         if word_iste:
@@ -2292,7 +2488,7 @@ class KDVBolmeApp:
         self.root = root
         self.root.title(f"YMM Karşıt İnceleme Asistanı  v{SURUM}")
         self.root.geometry("860x650")
-        self.root.minsize(820, 600)
+        self.root.minsize(820, 520)     # içerik sığmazsa ana alan kaydırılır
         self.root.configure(bg=APP)
         # Pencere başlık çubuğu ikonu (logo.ico varsa)
         try:
@@ -2321,8 +2517,14 @@ class KDVBolmeApp:
         # Word tutanaklarını tek dosyada birleştir + eşleşmeyenler için boş şablon
         self.word_tek_dosya = tk.BooleanVar(value=bool(ayar.get("word_tek_dosya", False)))
         self._bos_sablon = ayar.get("bos_sablon") or None
+        # Firma bazlı modda her VKN için son seçilen çıktı (sonraki ay öntanımlı gelir)
+        _ft = ayar.get("firma_tercih")
+        self._firma_tercih = ({str(k): v for k, v in _ft.items() if v in CIKTI_SECENEKLERI}
+                              if isinstance(_ft, dict) else {})
 
         self._ui()
+        self._ui_hazir = True
+        self._pencereyi_sigdir()      # ilk açılışta içeriğe göre boyut (ekranı aşmadan)
         self._surukle_birak()
 
     @staticmethod
@@ -2351,6 +2553,7 @@ class KDVBolmeApp:
                     "inceleme_dayanagi": self.inceleme_dayanagi.get(),
                     "word_tek_dosya": bool(self.word_tek_dosya.get()),
                     "bos_sablon":  self._bos_sablon or "",
+                    "firma_tercih": getattr(self, '_firma_tercih', {}),
                 }, f, ensure_ascii=False)
         except Exception:
             pass
@@ -2426,10 +2629,28 @@ class KDVBolmeApp:
                  font=('Segoe UI',12,'bold')).pack(side='left', pady=11)
         tk.Label(hdr, text=f"Sürüm {SURUM}", bg=ANA_RENK, fg='#E7C9D2',
                  font=('Segoe UI',9)).pack(side='right', padx=16)
+        self._ust_serit = hdr
 
-        # ── Ana dikey akış ──
-        main = tk.Frame(self.root, bg=APP)
-        main.pack(fill='both', expand=True, padx=PAD, pady=PAD)
+        # ── Ana dikey akış — KAYDIRILABİLİR alan ──
+        # İçerik (özellikle Word ayarları/günlük açıkken) küçük ekranlara sığmayabilir;
+        # bu yüzden ana alan bir Canvas içinde: sığmazsa dikey kaydırma çubuğu çıkar,
+        # hiçbir buton pencere dışına taşmaz.
+        dis = tk.Frame(self.root, bg=APP); dis.pack(fill='both', expand=True)
+        self._kanvas = tk.Canvas(dis, bg=APP, highlightthickness=0, bd=0)
+        self._kaydir = ttk.Scrollbar(dis, orient='vertical', command=self._kanvas.yview)
+        self._kanvas.configure(yscrollcommand=self._kaydir.set)
+        self._kanvas.pack(side='left', fill='both', expand=True)
+        main = tk.Frame(self._kanvas, bg=APP)
+        self._ana = main
+        self._kanvas_ogesi = self._kanvas.create_window((PAD, PAD), window=main, anchor='nw')
+        main.bind('<Configure>', lambda e: self._kaydirma_guncelle())
+        self._kanvas.bind('<Configure>', lambda e: self._kaydirma_guncelle(e.width))
+        try:
+            self.root.bind_all('<MouseWheel>', self._tekerlek, add='+')    # Windows/Mac
+            self.root.bind_all('<Button-4>', self._tekerlek, add='+')      # Linux yukarı
+            self.root.bind_all('<Button-5>', self._tekerlek, add='+')      # Linux aşağı
+        except Exception:
+            pass
         self.sol = main   # _logo_yukle geriye dönük uyum
 
         # ① Bırak alanı (akışın ilk adımı, en üstte)
@@ -2472,8 +2693,9 @@ class KDVBolmeApp:
             ilk = 80
         self.kapsam_scale = tk.Scale(
             sf, from_=50, to=100, orient='horizontal', showvalue=False,
-            command=self._kapsam_kaydir, bg=KART, fg=KOYU, troughcolor=KENAR,
-            highlightthickness=0, bd=0, sliderrelief='flat',
+            # bg = tutamacın rengi (beyaz tutamaç gri yolda "boşluk" gibi görünüyordu)
+            command=self._kapsam_kaydir, bg=ANA_RENK, fg=KOYU, troughcolor=KENAR,
+            highlightthickness=0, bd=0, sliderrelief='flat', width=10,
             activebackground=ANA_RENK2, sliderlength=18, length=120)
         try: self.kapsam_scale.set(ilk)
         except Exception: pass
@@ -2490,12 +2712,22 @@ class KDVBolmeApp:
         tk.Label(ci, text="Ne üretilsin?", bg=KART, fg=KOYU,
                  font=F_KUC, anchor='w').pack(fill='x')
         seg = tk.Frame(ci, bg=KENAR); seg.pack(fill='x', pady=(4,8))
+        self._seg_cerceve = seg
         self._seg_btn = {}
-        for etiket, deger in [("Excel","excel"), ("Word","word"), ("İkisi","ikisi")]:
-            b = tk.Label(seg, text=etiket, font=F_KUC, padx=8, pady=6, cursor='hand2')
+        for etiket, deger in [("Excel","excel"), ("Word","word"), ("İkisi","ikisi"),
+                              ("Firma bazlı","firma")]:
+            b = tk.Label(seg, text=etiket, font=F_KUC, padx=6, pady=6, cursor='hand2')
             b.pack(side='left', fill='x', expand=True, padx=1, pady=1)
             b.bind('<Button-1>', lambda e, d=deger: self._segment_sec(d))
             self._seg_btn[deger] = b
+        # Firma bazlı modun kısa açıklaması (yalnız o mod seçiliyken görünür)
+        self.firma_ipucu = tk.Label(
+            ci, text="Liste taranır; her firma için Excel / Word / ikisini siz seçersiniz. "
+                     "Word'ün türü (YMM yazısı ya da K.İ.T.) şablondan otomatik gelir.",
+            bg=KART, fg=GRI, font=('Segoe UI',8), justify='left', wraplength=250, anchor='w')
+        # açıklama satırı kart genişliğine göre kırılsın (gereksiz uzun/dar olmasın)
+        ci.bind('<Configure>', lambda e: self.firma_ipucu.config(
+            wraplength=max(220, e.width - 8)), add='+')
         self._segment_yenile()
         tk.Checkbutton(ci, text="Excel'in yanına PDF kopya",
                        variable=self.pdf_uret, onvalue=True, offvalue=False,
@@ -2514,7 +2746,7 @@ class KDVBolmeApp:
 
         # ── Oluştur butonu (tam genişlik) ──
         self.olustur_btn = tk.Button(
-            main, text="▶  TUTANAKLARI OLUŞTUR", command=self._olustur_tikla,
+            main, text=self._olustur_metni(), command=self._olustur_tikla,
             font=('Segoe UI',11,'bold'), bg=ANA_RENK, fg='white',
             activebackground=ANA_RENK2, activeforeground='white',
             relief='flat', bd=0, pady=12, cursor='hand2')
@@ -2606,14 +2838,35 @@ class KDVBolmeApp:
         self.bos_lbl.pack(side='left', padx=(8,0), fill='x', expand=True)
 
     def _word_blok_guncelle(self):
-        """Çıktı türü Word/İkisi ise Word Şablon bloğunu göster, değilse gizle."""
+        """Çıktı türü Word/İkisi/Firma bazlı ise Word Şablon bloğunu göster, değilse
+        gizle. Firma bazlı modda kısa açıklamayı da gösterir."""
         try:
-            if self.cikti_turu.get() in ('word', 'ikisi'):
+            tur = self.cikti_turu.get()
+            if tur == 'firma':
+                self.firma_ipucu.pack(fill='x', pady=(0,6), after=self._seg_cerceve)
+            else:
+                self.firma_ipucu.pack_forget()
+            if tur in ('word', 'ikisi', 'firma'):
                 self.word_blok.pack(fill='x')
             else:
                 self.word_blok.pack_forget()
         except Exception:
             pass
+        try:
+            self.olustur_btn.config(text=self._olustur_metni())
+        except Exception:
+            pass
+        if getattr(self, '_ui_hazir', False):
+            self._pencereyi_sigdir()          # Word ayarları açılınca pencere uzasın
+
+    def _olustur_metni(self):
+        """Ana butonun yazısı: firma bazlı modda önce liste taranır."""
+        try:
+            if self.cikti_turu.get() == 'firma':
+                return "📋  LİSTEYİ TARA — FİRMALARI SEÇ"
+        except Exception:
+            pass
+        return "▶  TUTANAKLARI OLUŞTUR"
 
     def _segment_yenile(self):
         """Segmented butonların seçili olanını bordo, diğerlerini nötr boyar."""
@@ -2649,6 +2902,63 @@ class KDVBolmeApp:
         except Exception:
             pass
 
+    def _kaydirma_guncelle(self, kanvas_gen=None):
+        """Kaydırılabilir ana alanı içeriğe göre ayarlar: iç çerçeve kanvas
+        genişliğini doldurur; içerik sığmıyorsa kaydırma çubuğu görünür, sığıyorsa gizlenir."""
+        try:
+            kv = self._kanvas
+            gen = kanvas_gen or kv.winfo_width()
+            if gen > 1:
+                kv.itemconfigure(self._kanvas_ogesi, width=max(gen - 2 * PAD, 200))
+            ic_h = self._ana.winfo_reqheight() + 2 * PAD
+            kv.configure(scrollregion=(0, 0, gen, ic_h))
+            if ic_h > kv.winfo_height() + 1:
+                if not self._kaydir.winfo_ismapped():
+                    self._kaydir.pack(side='right', fill='y', before=kv)
+            else:
+                if self._kaydir.winfo_ismapped():
+                    self._kaydir.pack_forget()
+                kv.yview_moveto(0)
+        except Exception:
+            pass
+
+    def _tekerlek(self, e):
+        """Fare tekerleği ana pencerede içeriği kaydırır (işlem günlüğü ve başka
+        pencereler kendi kaydırmasını korur)."""
+        try:
+            w = e.widget
+            if w.winfo_toplevel() is not self.root or w.winfo_class() == 'Text':
+                return
+            if not self._kaydir.winfo_ismapped():
+                return
+            if getattr(e, 'num', None) == 4:
+                adim = -1
+            elif getattr(e, 'num', None) == 5:
+                adim = 1
+            else:
+                adim = -1 if e.delta > 0 else 1
+            self._kanvas.yview_scroll(adim * 3, 'units')
+        except Exception:
+            pass
+
+    def _pencereyi_sigdir(self):
+        """Pencere, içeriği (mevcut moda göre) sığdıracak kadar uzar — ekran
+        yüksekliğini aşmadan. Kullanıcının büyüttüğü pencereyi küçültmez."""
+        try:
+            self.root.update_idletasks()
+            gerek = (self._ust_serit.winfo_reqheight() + self._ana.winfo_reqheight()
+                     + 2 * PAD + 4)
+            hedef = min(gerek, self.root.winfo_screenheight() - 90)  # görev çubuğu payı
+            mevcut = self.root.winfo_height()
+            if mevcut <= 1:                   # henüz ekrana çizilmedi
+                mevcut = 650
+            if hedef > mevcut:
+                gen = max(self.root.winfo_width(), 860)
+                self.root.geometry(f"{gen}x{hedef}")
+            self._kaydirma_guncelle()
+        except Exception:
+            pass
+
     def _log_ac_kapa(self):
         """İşlem günlüğünü açar/kapatır (başlangıçta kapalı)."""
         try:
@@ -2662,6 +2972,11 @@ class KDVBolmeApp:
                 self._log_acik = True
         except Exception:
             pass
+        # Günlük açılınca içerik uzar: pencereyi sığdır ve günlüğü görünür yap
+        self._pencereyi_sigdir()
+        if self._log_acik:
+            try: self._kanvas.yview_moveto(1.0)
+            except Exception: pass
 
     def _olustur_tikla(self):
         """Oluştur butonu: seçili dosyalarla işlemi başlatır."""
@@ -2675,12 +2990,305 @@ class KDVBolmeApp:
             except Exception:
                 pass
             return
-        self._isle_coklu(dosyalar)
+        if self.cikti_turu.get() == 'firma':
+            self._firma_tara(dosyalar)      # önce tara, firma seçim penceresini aç
+        else:
+            self._isle_coklu(dosyalar)
+
+    # ══════════════════════════════════════════
+    #  FİRMA BAZLI MOD: tara → firma başına Excel/Word/İkisi seç → üret
+    # ══════════════════════════════════════════
+    def _firma_tara(self, dosyalar):
+        """Listeyi arka planda tarar (dosya üretmez), sonra seçim penceresini açar."""
+        if self._isleniyor:
+            return
+        FORMATLAR = LISTE_UZANTILARI
+        gecerli = [d for d in dosyalar if Path(d).suffix.lower() in FORMATLAR]
+        if not gecerli:
+            self._log("❌ İşlenecek geçerli dosya yok (.xls/.xlsx/.csv/.txt).", "err")
+            return
+        if len(gecerli) > 1:
+            try:
+                messagebox.showinfo(
+                    "Tek liste seçin",
+                    "Firma bazlı seçim tek bir liste dosyasıyla çalışır.\n"
+                    "Lütfen yalnızca bir liste seçin (ya da çoklu dosya için "
+                    "Excel / Word / İkisi modlarından birini kullanın).")
+            except Exception:
+                pass
+            return
+        ok, kriter = self._kriter_al()
+        if not ok:
+            return
+        dosya = gecerli[0]
+        sablon_klasor = self._sablon_klasor
+        if not sablon_klasor:
+            self._log("ℹ️ Şablon klasörü seçilmedi: tüm firmalar 'şablon yok' görünecek; "
+                      "Word seçilenlere Excel üretilir (boş şablon seçiliyse o kullanılır).",
+                      "warn")
+        self._ayar_kaydet()
+        self._isleniyor = True
+        try: self.olustur_btn.config(state='disabled', text="⏳  LİSTE TARANIYOR…")
+        except Exception: pass
+        try: self.durum_lbl.config(text=f"{Path(dosya).name} taranıyor…", fg=KOYU)
+        except Exception: pass
+        self._log(f"\n{'═'*50}", "info")
+        self._log(f"📋 Firma bazlı tarama: {Path(dosya).name}", "info")
+
+        bos_sablon = self._bos_sablon
+
+        def _is():
+            indeks = {}       # taramanın şablon indeksi → üretimde yeniden kullanılır
+            try:
+                donem, plan = listeyi_tara(dosya, *kriter, sablon_klasor=sablon_klasor,
+                                           log_cb=self._log, tercihler=dict(self._firma_tercih),
+                                           bos_sablon=bos_sablon, indeks_disari=indeks)
+                hata = None
+            except Exception as e:
+                donem, plan, hata = None, [], str(e)
+            self.root.after(0, lambda: self._tarama_bitti(dosya, kriter, donem, plan, hata,
+                                                          sablon_index=indeks))
+        threading.Thread(target=_is, daemon=True).start()
+
+    def _tarama_bitti(self, dosya, kriter, donem, plan, hata=None, sablon_index=None):
+        self._isleniyor = False
+        try: self.olustur_btn.config(state='normal', text=self._olustur_metni())
+        except Exception: pass
+        if hata:
+            self._log(f"❌ Tarama yapılamadı: {hata}", "err")
+            try: self.durum_lbl.config(text="Hata — işlem günlüğünü açıp inceleyin", fg=HATA)
+            except Exception: pass
+            if not self._log_acik:
+                self._log_ac_kapa()
+            return
+        if not plan:
+            self._log("⚠️  Hiçbir firma kriterleri karşılamıyor.", "warn")
+            try: messagebox.showinfo("Firma yok", "Hiçbir firma kriterleri karşılamıyor.")
+            except Exception: pass
+            return
+        try: self.durum_lbl.config(text=f"● {len(plan)} firma bulundu — seçim yapın", fg=YESIL)
+        except Exception: pass
+        self._plan_penceresi(dosya, kriter, donem, plan, sablon_index=sablon_index)
+
+    @staticmethod
+    def _plan_word_sablonsuz(p):
+        """Word istenmiş ama ne eşleşen şablon ne de boş şablon var mı? (→ Excel'e düşer)"""
+        return p['cikti'] in ('word', 'ikisi') and not p['sablon'] and not p.get('bos')
+
+    @classmethod
+    def _plan_cikti_metni(cls, p):
+        """Plan satırının 'Çıktı' hücre yazısı — üretimde olacak olanı birebir söyler."""
+        etiket = CIKTI_ETIKET.get(p['cikti'], p['cikti'])
+        if p['cikti'] == 'excel':
+            return etiket
+        if cls._plan_word_sablonsuz(p):
+            return (f"{etiket}  ⚠ şablon yok → Excel" if p['cikti'] == 'word'
+                    else f"{etiket}  ⚠ şablon yok → yalnız Excel")
+        if not p['sablon']:
+            return f"{etiket}  (boş şablon)"
+        if p['sablon'] == 'Bilinmiyor':
+            return f"{etiket}  (tür okunamadı)"
+        return f"{etiket}  ({p['sablon']})"
+
+    @classmethod
+    def _plan_ozet(cls, plan):
+        """Pencerenin altındaki sayım satırı."""
+        ex = sum(1 for p in plan if p['cikti'] == 'excel')
+        wd = sum(1 for p in plan if p['cikti'] == 'word')
+        ik = sum(1 for p in plan if p['cikti'] == 'ikisi')
+        wsec = [p for p in plan if p['cikti'] in ('word', 'ikisi')]
+        ymm = sum(1 for p in wsec if p['sablon'] == 'YMM')
+        kit = sum(1 for p in wsec if p['sablon'] == 'K.İ.T.')
+        bos = sum(1 for p in wsec if not p['sablon'] and p.get('bos'))
+        yok = sum(1 for p in plan if cls._plan_word_sablonsuz(p))
+        metin = (f"{len(plan)} firma  ·  {ex} Excel  ·  {wd} Word  ·  {ik} Excel+Word"
+                 f"     Word türü: {ymm} YMM yazısı, {kit} K.İ.T."
+                 + (f", {bos} boş şablon" if bos else ""))
+        if yok:
+            metin += f"\n⚠ {yok} Word seçiminin şablonu yok → bu firmalar için Excel üretilecek"
+        return metin
+
+    def _plan_penceresi(self, dosya, kriter, donem, plan, sablon_index=None):
+        """Taranan firmaları listeleyen seçim penceresi (MODAL: açıkken ana pencerede
+        başka iş başlatılamaz). 'Çıktı' hücresine tıklamak, satıra çift tıklamak ya da
+        boşluk tuşu seçimi Excel → Word → Excel+Word arasında döndürür.
+        `sablon_index`: taramanın şablon indeksi — üretimde yeniden kullanılır."""
+        pen = tk.Toplevel(self.root)
+        pen.title(f"Firma Bazlı Çıktı Seçimi — {Path(dosya).name}  ({donem})")
+        pen.configure(bg=APP)
+        try:
+            pen.geometry("940x600"); pen.minsize(760, 420)
+            pen.transient(self.root)
+        except Exception:
+            pass
+        self._plan_pen = pen
+
+        ust = tk.Frame(pen, bg=ANA_RENK); ust.pack(fill='x')
+        tk.Label(ust, text=f"Firma bazlı çıktı seçimi  ·  {donem}", bg=ANA_RENK, fg='white',
+                 font=('Segoe UI', 11, 'bold')).pack(side='left', padx=14, pady=8)
+        tk.Label(pen, text="'Çıktı' hücresine tıklayın: Excel → Word → Excel+Word. "
+                           "Birden çok satırı seçip alttaki düğmelerle toplu atayabilirsiniz. "
+                           "Word'ün türü (YMM yazısı / K.İ.T.) firmanın şablonundan gelir.",
+                 bg=APP, fg=GRI, font=('Segoe UI', 9), justify='left', anchor='w',
+                 wraplength=900).pack(fill='x', padx=14, pady=(8, 4))
+
+        try:
+            st = ttk.Style()
+            st.configure("Plan.Treeview", rowheight=26, font=('Segoe UI', 9),
+                         background=KART, fieldbackground=KART, foreground=KOYU)
+            st.configure("Plan.Treeview.Heading", font=('Segoe UI', 9, 'bold'),
+                         background=KENAR, foreground=KOYU)
+            st.map("Plan.Treeview", background=[('selected', ANA_RENK2)],
+                   foreground=[('selected', 'white')])
+        except Exception:
+            pass
+
+        cerceve = tk.Frame(pen, bg=APP); cerceve.pack(fill='both', expand=True, padx=14)
+        kolonlar = ('sira', 'vkn', 'unvan', 'toplam', 'fatura', 'sablon', 'cikti')
+        tree = ttk.Treeview(cerceve, columns=kolonlar, show='headings',
+                            selectmode='extended', style="Plan.Treeview")
+        for k, bas, gen, hiz in [('sira', 'No', 40, 'center'),
+                                 ('vkn', 'VKN / TCKN', 105, 'center'),
+                                 ('unvan', 'Ünvan', 280, 'w'),
+                                 ('toplam', 'Toplam (₺)', 115, 'e'),
+                                 ('fatura', 'Fatura', 55, 'center'),
+                                 ('sablon', 'Şablon', 90, 'center'),
+                                 ('cikti', 'Çıktı  (tıkla)', 200, 'w')]:
+            tree.heading(k, text=bas)
+            tree.column(k, width=gen, anchor=hiz, stretch=(k in ('unvan', 'cikti')))
+        sb = ttk.Scrollbar(cerceve, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        sb.pack(side='right', fill='y')
+        tree.pack(side='left', fill='both', expand=True)
+        for tag, bg, fg in [('excel', KART, KOYU), ('word', '#F5E9EE', KOYU),
+                            ('ikisi', '#EEF0F6', KOYU), ('uyari', '#FBF3E2', UYARI)]:
+            try: tree.tag_configure(tag, background=bg, foreground=fg)
+            except Exception: pass
+
+        satir = {}          # iid → plan sözlüğü
+        def _etiket(p):
+            return 'uyari' if self._plan_word_sablonsuz(p) else p['cikti']
+        def _degerler(p):
+            return (p['sira'], p['vkn'], p['unvan'][:60], _tr_para_str(p['toplam']),
+                    p['fatura'],
+                    {'YMM': 'YMM yazısı', 'K.İ.T.': 'K.İ.T.', 'Bilinmiyor': 'okunamadı'}.get(
+                        p['sablon'], 'boş şablon' if p.get('bos') else '— yok'),
+                    self._plan_cikti_metni(p))
+        for p in plan:
+            iid = tree.insert('', 'end', values=_degerler(p), tags=(_etiket(p),))
+            satir[iid] = p
+
+        ozet_lbl = tk.Label(pen, text="", bg=APP, fg=KOYU, font=('Segoe UI', 9, 'bold'),
+                            anchor='w', justify='left', wraplength=900)
+        ozet_lbl.pack(fill='x', padx=14, pady=(6, 0))
+        pen.bind('<Configure>', lambda e: ozet_lbl.config(
+            wraplength=max(400, pen.winfo_width() - 40)), add='+')
+
+        def _yenile(iid=None):
+            for i in ([iid] if iid else list(satir)):
+                p = satir[i]
+                tree.item(i, values=_degerler(p), tags=(_etiket(p),))
+            ozet_lbl.config(text=self._plan_ozet(plan),
+                            fg=(UYARI if any(self._plan_word_sablonsuz(p) for p in plan)
+                                else KOYU))
+        def _dongu(iid):
+            p = satir.get(iid)
+            if not p:
+                return
+            sira = CIKTI_SECENEKLERI
+            p['cikti'] = sira[(sira.index(p['cikti']) + 1) % len(sira)]
+            _yenile(iid)
+        def _ata(deger, hepsi=False):
+            hedef = list(satir) if hepsi else list(tree.selection())
+            if not hedef:
+                try: messagebox.showinfo("Satır seçin", "Önce listeden firma seçin "
+                                         "(Ctrl/Shift ile birden çok).", parent=pen)
+                except Exception: pass
+                return
+            for i in hedef:
+                satir[i]['cikti'] = deger
+            _yenile()
+        def _onerilen():
+            for p in plan:
+                p['cikti'] = 'word' if p['sablon'] else 'excel'
+            _yenile()
+        def _tikla(e):
+            try:
+                if tree.identify_region(e.x, e.y) != 'cell':
+                    return
+                if tree.identify_column(e.x) != '#%d' % len(kolonlar):
+                    return
+                _dongu(tree.identify_row(e.y))
+            except Exception:
+                pass
+        def _cift_tikla(e):
+            # 'Çıktı' sütununda ilk tıklama zaten değiştirdi → çift tıklama 2 adım atmasın
+            try:
+                if tree.identify_column(e.x) == '#%d' % len(kolonlar):
+                    return
+                _dongu(tree.identify_row(e.y))
+            except Exception:
+                pass
+        def _bosluk(e):
+            for i in tree.selection():
+                _dongu(i)
+            return 'break'      # Treeview'in kendi boşluk (seçimi aç/kapa) davranışını engelle
+        tree.bind('<Button-1>', _tikla, add='+')
+        tree.bind('<Double-1>', _cift_tikla)
+        tree.bind('<space>', _bosluk)
+        _yenile()
+
+        # Toplu atama düğmeleri
+        tf = tk.Frame(pen, bg=APP); tf.pack(fill='x', padx=14, pady=(8, 0))
+        tk.Label(tf, text="Seçilenleri:", bg=APP, fg=GRI, font=('Segoe UI', 9)).pack(side='left')
+        for et, d in [("Excel", 'excel'), ("Word", 'word'), ("Excel+Word", 'ikisi')]:
+            self._buton(tf, et, lambda d=d: _ata(d)).pack(side='left', padx=(6, 0))
+        tk.Label(tf, text="   Tümü:", bg=APP, fg=GRI, font=('Segoe UI', 9)).pack(side='left')
+        self._buton(tf, "Excel", lambda: _ata('excel', hepsi=True)).pack(side='left', padx=(6, 0))
+        self._buton(tf, "Word", lambda: _ata('word', hepsi=True)).pack(side='left', padx=(6, 0))
+        self._buton(tf, "Önerilen (şablonu olan Word)", _onerilen).pack(side='left', padx=(6, 0))
+
+        # Alt düğmeler
+        af = tk.Frame(pen, bg=APP); af.pack(fill='x', padx=14, pady=12)
+        def _kapat():
+            try: pen.grab_release()
+            except Exception: pass
+            try: pen.destroy()
+            except Exception: pass
+        def _iptal():
+            self._log("ℹ️ Firma bazlı seçim iptal edildi; dosya üretilmedi.", "info")
+            _kapat()
+        def _onayla():
+            if self._isleniyor:          # seçimler kaybolmasın: pencere açık kalır
+                try: messagebox.showinfo("İşlem sürüyor", "Önceki işlem bitmeden yeni "
+                                         "üretim başlatılamaz. Lütfen bekleyin.", parent=pen)
+                except Exception: pass
+                return
+            firma_cikti = {str(p['vkn']): p['cikti'] for p in plan}
+            self._firma_tercih.update(firma_cikti)       # sonraki çalıştırmada öntanımlı
+            self._ayar_kaydet()
+            _kapat()
+            self._isle_coklu([dosya], firma_cikti=firma_cikti, kriter=kriter,
+                             hazir_sablon_index=sablon_index)
+        self._buton(af, "İptal", _iptal).pack(side='left')
+        tk.Button(af, text="▶  TUTANAKLARI OLUŞTUR", command=_onayla,
+                  font=('Segoe UI', 10, 'bold'), bg=ANA_RENK, fg='white',
+                  activebackground=ANA_RENK2, activeforeground='white',
+                  relief='flat', bd=0, padx=18, pady=8, cursor='hand2').pack(side='right')
+        try: pen.protocol("WM_DELETE_WINDOW", _iptal)
+        except Exception: pass
+        try:                              # modal: ana pencerede başka iş başlatılmasın
+            pen.grab_set(); pen.focus_set()
+        except Exception:
+            pass
+        # Test/geri çağrı erişimi için (GUI dışı doğrulama)
+        pen._plan, pen._onayla, pen._dongu, pen._satir = plan, _onayla, _dongu, satir
+        return pen
 
     def _dosya_sec(self, dosyalar):
         """Seçilen/bırakılan dosyaları saklar ve bırak alanını 'hazır' gösterir
         (işlem 'TUTANAKLARI OLUŞTUR' ile başlar)."""
-        FORMATLAR = ('.xls', '.xlsx', '.csv', '.txt')
+        FORMATLAR = LISTE_UZANTILARI
         gecerli = [d for d in dosyalar if Path(d).suffix.lower() in FORMATLAR]
         if not gecerli:
             self._birak_guncelle("Desteklenmeyen dosya (Excel/CSV/TXT)", HATA)
@@ -2691,7 +3299,9 @@ class KDVBolmeApp:
         else:
             self.birak_yazi.config(text=f"{len(gecerli)} dosya seçildi", fg=KOYU)
         try:
-            self.birak_alt.config(text="✓ hazır — TUTANAKLARI OLUŞTUR'a basın", fg=YESIL)
+            self.birak_alt.config(
+                text=("✓ hazır — LİSTEYİ TARA'ya basın" if self.cikti_turu.get() == 'firma'
+                      else "✓ hazır — TUTANAKLARI OLUŞTUR'a basın"), fg=YESIL)
             self.durum_lbl.config(text="● Dosya hazır", fg=YESIL)
         except Exception:
             pass
@@ -2794,6 +3404,8 @@ class KDVBolmeApp:
         # Klasör seçildi ama çıktı 'yalnız Excel' ise, Word'ü de üretsin diye 'İkisi'ye al
         if self._sablon_klasor and self.cikti_turu.get() == 'excel':
             self.cikti_turu.set('ikisi')
+            self._segment_yenile()
+            self._word_blok_guncelle()
         self._ayar_kaydet()
 
     def _kriter_al(self):
@@ -2816,10 +3428,13 @@ class KDVBolmeApp:
         """Tek dosya — toplu işleyiciye yönlendirir (DND/uyum için korunur)."""
         self._isle_coklu([dosya])
 
-    def _isle_coklu(self, dosyalar):
+    def _isle_coklu(self, dosyalar, firma_cikti=None, kriter=None, hazir_sablon_index=None):
+        """Seçili dosyaları işler. Firma bazlı modda `firma_cikti` ({vkn: seçim}) ve
+        taramada kullanılan `kriter` (et, eto, y) verilir — tarama ile üretim AYNI
+        kriterle yapılsın diye kriter yeniden okunmaz."""
         if self._isleniyor:
             self._log("⚠️  İşlem devam ediyor...", "warn"); return
-        FORMATLAR = ('.xls', '.xlsx', '.csv', '.txt')
+        FORMATLAR = LISTE_UZANTILARI
         gecerli = [d for d in dosyalar if Path(d).suffix.lower() in FORMATLAR]
         for d in dosyalar:
             if Path(d).suffix.lower() not in FORMATLAR:
@@ -2828,17 +3443,21 @@ class KDVBolmeApp:
             self._log("❌ İşlenecek geçerli dosya yok (.xls/.xlsx/.csv/.txt).", "err")
             return
 
-        ok, kriter = self._kriter_al()
-        if not ok:
-            return
+        if kriter is None:
+            ok, kriter = self._kriter_al()
+            if not ok:
+                return
         esik_tek, esik_toplam, yuzde80 = kriter
         pdf_uret = bool(self.pdf_uret.get())   # ana thread'de oku, worker'a geçir
-        cikti_turu = self.cikti_turu.get()
+        cikti_turu = 'firma' if firma_cikti is not None else self.cikti_turu.get()
+        if cikti_turu == 'firma' and firma_cikti is None:
+            cikti_turu = 'ikisi'      # güvenlik: plan yoksa eski davranış
         inceleme_dayanagi = self.inceleme_dayanagi.get().strip()
         word_tek_dosya = bool(self.word_tek_dosya.get())
         bos_sablon = self._bos_sablon
         # Word gereken modda şablon klasörü şart; yoksa kullanıcıyı uyar
-        sablon_klasor = self._sablon_klasor if cikti_turu in ('word', 'ikisi') else None
+        sablon_klasor = (self._sablon_klasor
+                         if cikti_turu in ('word', 'ikisi', 'firma') else None)
         if cikti_turu in ('word', 'ikisi') and not sablon_klasor:
             if cikti_turu == 'word':
                 messagebox.showerror(
@@ -2863,13 +3482,15 @@ class KDVBolmeApp:
         threading.Thread(
             target=self._batch_worker,
             args=(gecerli, esik_tek, esik_toplam, yuzde80, pdf_uret, sablon_klasor,
-                  cikti_turu, inceleme_dayanagi, word_tek_dosya, bos_sablon),
+                  cikti_turu, inceleme_dayanagi, word_tek_dosya, bos_sablon, firma_cikti,
+                  hazir_sablon_index),
             daemon=True
         ).start()
 
     def _batch_worker(self, dosyalar, esik_tek, esik_toplam, yuzde80, pdf_uret,
                       sablon_klasor=None, cikti_turu='ikisi', inceleme_dayanagi=None,
-                      word_tek_dosya=False, bos_sablon=None):
+                      word_tek_dosya=False, bos_sablon=None, firma_cikti=None,
+                      hazir_sablon_index=None):
         toplam_b = 0; toplam_h = 0; son_klasor = None
         toplam_sec = 0; toplam_sablonsuz = 0; toplam_gecersiz = 0; son_kapsam = None
         n = len(dosyalar)
@@ -2885,7 +3506,9 @@ class KDVBolmeApp:
                                self._log, _tamam_ic, self._ilerleme,
                                self._cikis_kok, pdf_uret, sablon_klasor, cikti_turu,
                                inceleme_dayanagi or None,
-                               word_tek_dosya=word_tek_dosya, bos_sablon=bos_sablon)
+                               word_tek_dosya=word_tek_dosya, bos_sablon=bos_sablon,
+                               firma_cikti=firma_cikti,
+                               hazir_sablon_index=hazir_sablon_index)
             except Exception as e:
                 self._log(f"❌ {e}", "err")
             toplam_b += sonuc.get('b', 0); toplam_h += sonuc.get('h', 0)
@@ -2936,7 +3559,7 @@ class KDVBolmeApp:
         self._isleniyor = False
         def _():
             try:
-                self.olustur_btn.config(state='normal', text="▶  TUTANAKLARI OLUŞTUR")
+                self.olustur_btn.config(state='normal', text=self._olustur_metni())
             except Exception:
                 pass
             self._metrik_guncelle(basarili, ozet)
