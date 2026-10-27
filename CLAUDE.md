@@ -235,6 +235,10 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
    açıklama + yan rapor dosyası üretilmeli.
 5. **Tek dosya sadeliği.** Şimdilik `exay.py` tek dosya; bölmeden önce gerçek
    ihtiyaç olduğundan emin ol.
+6. **Kullanıcı kararlarını not al.** Kullanıcı bir soruyu yanıtladığında ya da
+   bir tercihi onayladığında bunu §11'e tarihle yaz (kullanıcının isteği). Böylece
+   yeni bir sohbette aynı soru tekrar sorulmaz. §11'deki bir kararı değiştirmeden
+   önce kullanıcıya danış.
 
 ---
 
@@ -333,10 +337,29 @@ Nisan %94.2, Ocak %82.2, Muhasebe %82.4.
   ayrımı gözetmeden 1'den ardışıktır (VKN_LISTESI ve CIKTI_PLANI ile birebir).
   Bu yüzden yalnız Excel dosyalarına bakınca numara atlanmış görünebilir (o firma
   Word almıştır). Excel ve Word'ün ayrı ayrı 1'den numaralanması istenirse bu bir
-  §2.4 kararıdır — kullanıcıya danışılmadan değiştirilmez.
+  §2.4 kararıdır — kullanıcıya danışılmadan değiştirilmez. **Kullanıcı ortak sırayı
+  onayladı (bkz. §11).**
   Eski Excel/Word/İkisi modlarının davranışı DEĞİŞMEDİ (yedek Excel yalnız firma modunda).
 - **Ana pencere kaydırılabilir:** Word ayarları/günlük açıkken içerik 650 px'e
   sığmıyordu (Word/İkisi modunda ana buton pencere dışında kalıyordu). Ana alan
   Canvas içinde; pencere açılışta/mod değişince içeriğe göre ekranı aşmadan uzar
   (`_pencereyi_sigdir`), sığmazsa kaydırma çubuğu çıkar. Görsel doğrulama:
   Xvfb + python3.12-tk ile gerçek pencere çizilip ekran görüntüsü alınabilir.
+
+---
+
+## 11. Kullanıcı kararları (onaylanmış — tekrar sorma)
+
+> Kullanıcının açıkça verdiği yanıtlar ve onaylar. Yeni bir karar alındıkça
+> buraya tarihle eklenir (§9.6). Değiştirmeden önce kullanıcıya danışılır.
+
+- **2026-10 — Firma bazlı çıktı seçimi istendi:** Program listeyi tarayıp hangi
+  firmanın Excel, hangisinin Word alacağını seçtirmeli. **Word'ün türünü kullanıcı
+  seçmez;** firmanın şablonu YMM yazısıysa YMM, K.İ.T. ise K.İ.T. üretilir.
+  (Sürüm 5.2, "Firma bazlı" modu.)
+- **2026-10-27 — Numaralandırma: ORTAK SIRA.** Firma bazlı modda `N)` numarası
+  firmanın sırasıdır; Excel ve Word aynı sırayı paylaşır (Excel klasöründe numara
+  atlanmış görünebilir). Excel ve Word'ü ayrı ayrı 1'den numaralandırma seçeneği
+  sunuldu, kullanıcı **ortak sırayı** seçti.
+- **2026-10-27 — Not alma:** Kullanıcı, kararlarının ve onaylarının bu dosyaya
+  sık sık not edilmesini istedi.
